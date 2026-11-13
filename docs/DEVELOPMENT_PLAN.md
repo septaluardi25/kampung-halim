@@ -285,7 +285,7 @@ flowchart TD
 ### Tahap 2 — Login & Keamanan Backend
 
 #### `T-06` — Utilitas `bcryptjs`, JWT, Zod Auth Schema, & Rate Limiter
-- **Deskripsi:** Mengimplementasikan hash/verify `bcryptjs`, sign/verify JWT (`1d`) dengan `JWT_SECRET`, schema Zod untuk login (`email` minimal 5 karakter & valid, `password` minimal 6 karakter), serta `express-rate-limit` (maksimal 5 percobaan/menit pada `/api/auth/login`).
+- **Deskripsi:** Mengimplementasikan hash/verify `bcryptjs`, sign/verify JWT (`1d`) dengan `JWT_SECRET`, schema Zod untuk login (`email` minimal 5 karakter & valid, `password` minimal 6 karakter), serta `middleware/rateLimiter.ts` (`express-rate-limit` maksimal 5 percobaan/menit pada `/api/auth/login`).
 - **Dependency:** `T-02`
 - **Acceptance Criteria:**
   - JWT memiliki expiry `1d` dan hanya ditandatangani serta diverifikasi dengan `JWT_SECRET`.
@@ -293,13 +293,13 @@ flowchart TD
   - Password di-crypt (hash) menggunakan `bcryptjs` (salt rounds: 10).
   - Percobaan login ke-6 dalam 1 menit ditolak dengan HTTP `429` dan pesan bahasa Indonesia.
 
-#### `T-07` — Endpoint `POST /api/auth/login`, `GET /api/auth/me`, & Middleware Pelindung
-- **Deskripsi:** Mengimplementasikan login, cek sesi `/auth/me`, middleware `authenticate` (verifikasi JWT + cek `is_active` dari DB), dan middleware `authorizeAdmin`.
+#### `T-07` — Endpoint `POST /api/auth/login`, `GET /api/auth/me`, Service Layer, & Middleware Pelindung
+- **Deskripsi:** Memisahkan layer `services/auth.service.ts` dan `controllers/auth.controller.ts` untuk endpoint login dan cek sesi `/auth/me` (menyertakan `employee_id`/`employeeId` & `is_active`/`isActive`), membuat `types/express.d.ts` (request augmentation), `middleware/authenticate.ts` (verifikasi JWT + cek `is_active` & role terbaru dari DB), serta `middleware/authorize.ts` (reusable role checker termasuk `authorizeAdmin`).
 - **Dependency:** `T-04`, `T-06`
 - **Acceptance Criteria:**
-  - Login berhasil mengembalikan JWT dan data user (tanpa `password_hash`); akun `is_active = 0` ditolak (`403`); password salah ditolak (`401`).
+  - Login berhasil mengembalikan JWT dan data user (tanpa `password_hash`, menyertakan `employee_id`/`employeeId` & `is_active`/`isActive`); akun `is_active = 0` ditolak (`403`); email tidak terdaftar atau password salah ditolak (`401`) dengan pesan seragam `"Email atau password salah"` tanpa membocorkan mana yang salah.
   - Endpoint tanpa token atau token kedaluwarsa ditolak `401`.
-  - `authorizeAdmin` menolak token ber-role `user` dengan `403`.
+  - `authorize('admin')` / `authorizeAdmin` menolak token ber-role `user` dengan `403`.
   - Tidak ada endpoint `/api/auth/register`.
 
 ---

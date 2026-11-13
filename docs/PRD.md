@@ -285,9 +285,11 @@ warga-halim/
   server/
     src/
       routes/       definisi URL
-      controllers/  logika tiap endpoint
+      controllers/  penanganan HTTP request dan response
+      services/     business logic dan query database
       schemas/      Zod untuk validasi
-      middleware/   auth JWT, error handler
+      middleware/   auth JWT (authenticate, authorize), rate limiter, error handler
+      types/        TypeScript request augmentation (express.d.ts)
       db/           koneksi pool, file schema.sql, seed.sql
       app.ts        membuat Express app
 ```
