@@ -8,3 +8,4 @@ const router = Router();
 router.get('/employees', authenticate, getEmployees);
 
 export default router;
+

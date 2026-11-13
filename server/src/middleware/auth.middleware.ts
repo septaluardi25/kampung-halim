@@ -66,3 +66,4 @@ export async function authenticate(
     sendError(res, 401, 'Token autentikasi tidak valid atau telah kedaluwarsa');
   }
 }
+

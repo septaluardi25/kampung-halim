@@ -313,7 +313,10 @@ Semua dimulai dengan `/api`. Respons selalu berbentuk `{ success, data, message 
 ### Aturan teknis
 
 - **Keamanan & Akses (Setting Default):**
-  - Password di-hash dengan bcrypt, token JWT berlaku 1 hari, semua query memakai parameter (`?`) agar kebal SQL injection, login dibatasi 5 percobaan per menit, CORS hanya untuk alamat client.
+  - Password wajib di-crypt (di-hash) menggunakan `bcryptjs` (salt rounds: 10) dan jangan pernah disimpan sebagai plaintext.
+  - Token JWT ditandatangani dan diverifikasi menggunakan `JWT_SECRET` yang aman (berlaku 1 hari / `1d`).
+  - Validasi akun user: nama minimal 5 karakter, email minimal 5 karakter (format email valid), password minimal 6 karakter.
+  - Semua query memakai parameter (`?`) agar kebal SQL injection, login dibatasi 5 percobaan per menit, CORS hanya untuk alamat client.
   - Server memeriksa token dan role (`admin` atau `user`) serta status `is_active` pada setiap endpoint terproteksi.
   - Tanpa token valid, publik hanya bisa mengakses `POST /auth/login` dan `GET /photos` (yang hanya mengembalikan foto-foto tanpa biodata).
   - User dengan role `user` hanya melihat data berstatus `published`; data `draft` hanya terlihat oleh `admin`.
