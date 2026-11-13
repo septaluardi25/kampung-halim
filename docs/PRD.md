@@ -8,14 +8,15 @@ Warga Halim adalah website kenangan untuk satu perusahaan yang sudah bubar, deng
 
 **Asumsi yang dipakai dokumen ini** (ubah jika keliru):
 
-- Ada dua peran yang punya akun: Admin (1 orang) dan User (mantan karyawan yang akunnya dibuat oleh admin dengan email dan password).
+- Ada dua peran yang punya akun: Admin (1 orang) dan User (mantan karyawan yang dapat mendaftar mandiri lewat `/register` dengan persetujuan/aktivasi admin, maupun dibuatkan langsung oleh admin).
 - Biodata karyawan, kenangan bersama, dan pesan dan kesan sepenuhnya diisi/dikelola oleh admin. User tidak dapat menambahkan, mengubah, atau menghapus pesan apa pun.
-- Pengunjung tanpa login hanya dapat melihat foto-foto di halaman Home (`/`), tanpa nama lengkap/biodata karyawan, kenangan, maupun pesan. Jika ingin melihat biodata karyawan dan semua data lainnya, pengunjung harus login terlebih dahulu.
+- Pengunjung tanpa login hanya dapat melihat foto-foto di halaman Home (`/`), mengakses halaman Login (`/login`), dan mendaftar akun di halaman Registrasi (`/register`), tanpa dapat melihat nama lengkap/biodata karyawan, kenangan, maupun pesan.
+- Akun yang mendaftar mandiri melalui `/register` memiliki status awal nonaktif (`is_active = false`) dan baru bisa login setelah disetujui/diaktifkan oleh Admin melalui Panel Admin.
 - User yang sudah login (dan admin) dapat melihat semua data terbit: daftar karyawan, biodata lengkap semua karyawan, kenangan bersama, dan pesan dan kesan.
 - Foto hanya diunggah oleh admin, user tidak bisa upload. Di halaman detail karyawan (khusus login), jika belum ada foto, karyawan ditampilkan dengan avatar inisial (misalnya "AB" untuk Andi Budi).
 - Aplikasi berfokus pada data karyawan, kenangan bersama, serta pesan dan kesan, tanpa tabel profil perusahaan terpisah.
-- Target "minimal 10 user" dibaca sebagai minimal 10 akun user yang dibuat oleh admin saat peluncuran.
-- Bahasa antarmuka: Indonesia. Hosting: Vercel. Login: JWT. Tidak ada deadline.
+- Target "minimal 10 user" dibaca sebagai minimal 10 akun user aktif saat peluncuran.
+- Bahasa antarmuka: Indonesia. Login: JWT. *(Catatan: Konfigurasi/deployment ke Vercel ditangguhkan terlebih dahulu; fokus pada pengembangan dan pengujian lokal).* Tidak ada deadline.
 
 ## 2. Goals dan Metrik Keberhasilan
 
@@ -34,7 +35,7 @@ Tujuan utama: memberi mantan karyawan satu tempat yang rapi untuk mengenang reka
 - Penambahan, pengeditan, atau penghapusan pesan oleh user.
 - Fitur edit pesan oleh admin maupun user.
 - Upload foto oleh user, dan upload video.
-- Registrasi mandiri oleh pengunjung/user secara terbuka.
+- Registrasi mandiri yang langsung aktif tanpa persetujuan/aktivasi Admin.
 - Aplikasi mobile native.
 
 **Metrik keberhasilan**
@@ -54,8 +55,8 @@ Pengguna utama adalah mantan karyawan yang ingin bernostalgia. Ada tiga peran: p
 
 | Peran | Siapa | Login? | Boleh apa |
 | --- | --- | --- | --- |
-| Pengunjung | Siapa pun yang punya link | Tidak | Hanya melihat foto-foto di halaman Home (`/`) dan halaman Login (`/login`). Tidak bisa melihat daftar/biodata karyawan, kenangan, maupun pesan dan kesan |
-| User | Mantan karyawan yang akunnya dibuat admin | Ya, email dan password | Melihat semua data terbit: daftar karyawan, biodata lengkap dirinya sendiri maupun semua karyawan lain, kenangan, serta pesan dan kesan. Tidak dapat menambahkan, mengubah, atau menghapus data apa pun |
+| Pengunjung | Siapa pun yang punya link | Tidak | Melihat foto-foto di halaman Home (`/`), membuka halaman Login (`/login`), dan mengajukan pendaftaran akun di halaman Registrasi (`/register`). Tidak bisa melihat daftar/biodata karyawan, kenangan, maupun pesan dan kesan |
+| User | Mantan karyawan yang akunnya aktif (disetujui atau dibuat admin) | Ya, email dan password | Melihat semua data terbit: daftar karyawan, biodata lengkap dirinya sendiri maupun semua karyawan lain, kenangan, serta pesan dan kesan. Tidak dapat menambahkan, mengubah, atau menghapus data apa pun |
 | Admin | Pemilik proyek (1 orang) | Ya, email dan password | Semua hak user, ditambah mengelola karyawan, kenangan, menambah dan menghapus pesan (tanpa edit pesan), mengelola akun user, serta satu-satunya yang bisa mengunggah foto |
 
 **Gambaran pengguna:** mantan karyawan yang membuka link dari grup chat di HP, melihat foto-foto di Home, lalu login dengan akun dari admin untuk melihat biodata rekan kerja, kenangan, serta pesan dan kesan. Karena itu halaman harus ringan, nyaman di HP, dan tulisannya besar serta jelas.
@@ -70,11 +71,11 @@ Versi pertama (MVP) hanya mengerjakan kolom Must-have. Kolom Nice-to-have dikerj
 | Karyawan | Daftar kartu dan halaman detail biodata (khusus yang sudah login), pencarian nama, foto karyawan yang diunggah admin | User mengubah biodatanya sendiri |
 | Kenangan | Daftar kenangan bertanggal dan halaman detail (khusus yang login), tag karyawan yang terlibat | Foto untuk kenangan (diunggah admin) |
 | Pesan dan kesan | Daftar pesan antar karyawan (1 karyawan dapat membuat/memiliki banyak pesan untuk karyawan lainnya), khusus dibaca oleh user login, dan hanya ditambah/dihapus oleh admin (tanpa edit pesan) | - |
-| Akun user | Login, logout (menu nama user dan tombol Keluar di header), admin membuat dan mengelola akun user | Lupa password lewat email, ganti password |
-| Admin | Login JWT, CRUD karyawan dan kenangan, tambah & hapus pesan (tanpa edit), kelola akun user, unggah foto karyawan | Dashboard ringkasan angka |
+| Akun user | Registrasi mandiri (`/register` -> `POST /api/auth/register`, status awal `is_active = false` menunggu aktivasi admin), login, logout (menu nama user dan tombol Keluar di header), admin membuat/mengaktifkan/mengelola akun user | Lupa password lewat email, ganti password |
+| Admin | Login JWT, CRUD karyawan dan kenangan, tambah & hapus pesan (tanpa edit), kelola akun user (termasuk aktivasi pendaftar baru & penautan karyawan), unggah foto karyawan | Dashboard ringkasan angka |
 | Tampilan | Responsif HP dan desktop, bahasa Indonesia | Dark mode, export PDF |
 
-**Di luar scope (tidak dikerjakan):** registrasi mandiri oleh user, input/edit/hapus pesan oleh user, edit pesan oleh admin, upload foto oleh user, upload video, login lewat Google atau media sosial, komentar publik tanpa moderasi, notifikasi email, multi-bahasa.
+**Di luar scope (tidak dikerjakan):** registrasi langsung aktif tanpa persetujuan admin, input/edit/hapus pesan oleh user, edit pesan oleh admin, upload foto oleh user, upload video, login lewat Google atau media sosial, komentar publik tanpa moderasi, notifikasi email, multi-bahasa.
 
 ## 5. Detail Fitur
 
@@ -111,12 +112,14 @@ Setiap fitur ditulis dengan aturan sederhana dan kriteria penerimaan (acceptance
 - Halaman khusus (`/pesan`) menampilkan semua pesan terbit; di halaman detail karyawan (`/karyawan/:id`) menampilkan pesan terkait karyawan tersebut.
 - Selesai jika: pengunjung tanpa login diarahkan ke `/login`, user login bisa membaca seluruh pesan terbit dengan identitas pengirim dan penerima yang jelas, dan pesan hanya dapat ditambah/dihapus oleh Admin tanpa fitur edit.
 
-### F5. Login dan Sesi User
+### F5. Registrasi, Login, dan Sesi User
 
-- Tidak ada halaman registrasi `/daftar` dan endpoint `POST /auth/register`; akun user dibuat oleh admin melalui Panel Admin.
+- Tersedia halaman registrasi publik `/register` dan endpoint `POST /api/auth/register` (dengan rate limiter 5 percobaan per menit per IP).
+- Pengunjung mendaftar menggunakan `name` (minimal 5 karakter), `email` (minimal 5 karakter, format email valid, unik), dan `password` (minimal 6 karakter), ditambah konfirmasi password pada form frontend.
+- Password di-hash menggunakan `bcryptjs` (salt rounds: 10). Akun baru dari registrasi otomatis memiliki `role = 'user'`, `employee_id = NULL`, dan **`is_active = false` (`0`)** sehingga belum bisa login sampai disetujui/diaktifkan oleh Admin melalui Panel Admin (`/admin/*`).
 - Tidak ada halaman terpisah Akun Saya; setelah login, header cukup menampilkan **nama user** dan tombol **Keluar** (admin juga melihat tautan Panel Admin).
 - Login dengan email dan password, satu halaman login (`/login`) untuk admin dan user. Berhasil: server mengirim token JWT, disimpan di Zustand (`localStorage`), dipakai di setiap request yang butuh login.
-- Selesai jika: login berhasil dengan akun yang dibuat admin, nama user dan tombol Keluar muncul di header, token kedaluwarsa mengarahkan kembali ke login, dan user biasa tidak bisa membuka halaman admin.
+- Selesai jika: pengunjung dapat mendaftar di `/register` (status awal nonaktif), gagal login sebelum diaktifkan admin (`403`), berhasil login setelah diaktifkan admin, nama user dan tombol Keluar muncul di header, token kedaluwarsa mengarahkan kembali ke login, dan user biasa tidak bisa membuka halaman admin.
 
 ### F6. Panel Admin (khusus admin)
 
@@ -138,15 +141,16 @@ Ada tiga alur: pengunjung (belum login) hanya melihat foto-foto di Home dan diar
 ### Alur pengunjung
 
 1. Membuka link dari grup chat dan masuk ke Beranda / Home (`/`).
-2. Melihat galeri foto-foto karyawan yang tersedia dan tombol Masuk (`/login`).
-3. Jika mencoba membuka menu atau URL Karyawan, detail biodata, Kenangan, maupun Pesan dan Kesan tanpa login, pengunjung otomatis diarahkan ke halaman Login (`/login`).
-4. Jika alamat tidak ada, melihat halaman "tidak ditemukan" dengan tombol kembali ke Home (`/`).
+2. Melihat galeri foto-foto karyawan yang tersedia, tombol Masuk (`/login`), dan tautan Daftar (`/register`).
+3. Dapat mengajukan pendaftaran akun baru di `/register` (status awal nonaktif menunggu aktivasi Admin).
+4. Jika mencoba membuka menu atau URL Karyawan, detail biodata, Kenangan, maupun Pesan dan Kesan tanpa login, pengunjung otomatis diarahkan ke halaman Login (`/login`).
+5. Jika alamat tidak ada, melihat halaman "tidak ditemukan" dengan tombol kembali ke Home (`/`).
 
 ### Alur admin
 
 1. Membuka `/login`, mengisi email dan password.
 2. Jika benar, token disimpan di Zustand dan panel admin terbuka. Jika salah, muncul toast error dan form tetap ada.
-3. Membuka menu Akun User untuk membuat akun user baru, mengubah, menonaktifkan, atau menghapus akun.
+3. Membuka menu Akun User untuk memverifikasi/mengaktifkan akun pendaftar baru (`is_active = true`), menautkan ke data karyawan (`employee_id`), membuat akun user baru, mengubah, menonaktifkan, atau menghapus akun.
 4. Memilih modul Karyawan atau Kenangan untuk menambah, mengubah (Draft/Terbit), atau menghapus data serta mengunggah/mengganti foto karyawan.
 5. Memilih modul Pesan dan Kesan untuk menambahkan pesan baru (memilih karyawan pengirim -> karyawan penerima, pesan, dan kesan opsional) atau menghapus pesan (tanpa fitur edit).
 6. Setiap aksi simpan atau hapus menampilkan toast sukses/gagal, dan data terbit langsung terlihat oleh user yang login.
@@ -154,8 +158,8 @@ Ada tiga alur: pengunjung (belum login) hanya melihat foto-foto di Home dan diar
 
 ### Alur user
 
-1. Akun didaftarkan oleh admin sehingga tidak ada form registrasi mandiri.
-2. Login di `/login`. Setelah berhasil, token disimpan di Zustand, header menampilkan nama user dan tombol Keluar, dan user dapat membuka seluruh data: daftar karyawan, biodata lengkap dirinya maupun semua karyawan lain, kenangan, serta pesan dan kesan.
+1. Mendaftar mandiri melalui `/register` (lalu menunggu aktivasi dari Admin) atau dibuatkan akun oleh Admin.
+2. Login di `/login`. Jika akun belum diaktifkan admin, login ditolak (`403`). Setelah aktif dan berhasil login, token disimpan di Zustand, header menampilkan nama user dan tombol Keluar, dan user dapat membuka seluruh data: daftar karyawan, biodata lengkap dirinya maupun semua karyawan lain, kenangan, serta pesan dan kesan.
 3. User hanya dapat membaca data dan tidak dapat menambahkan, mengubah, atau menghapus apa pun.
 4. Jika token kedaluwarsa, user diarahkan ke halaman login.
 
@@ -173,7 +177,8 @@ Nuansa yang dituju: hangat, tenang, nostalgia. Bukan terasa seperti website bisn
 | Daftar Kenangan | `/kenangan` | User | Daftar kartu kenangan. Pengunjung diarahkan ke login |
 | Detail Kenangan | `/kenangan/:id` | User | Cerita lengkap, karyawan yang di-tag. Pengunjung diarahkan ke login |
 | Pesan dan Kesan | `/pesan` | User | Semua pesan antar karyawan (pengirim -> penerima) untuk dibaca user login. Pengunjung diarahkan ke login |
-| Login | `/login` | Publik | Form email dan password untuk admin dan user |
+| Login | `/login` | Publik | Form email dan password untuk admin dan user, plus tautan ke `/register` |
+| Registrasi | `/register` | Publik | Form pendaftaran user baru (`name`, `email`, `password`, `confirmPassword`) dengan status menunggu aktivasi admin |
 | Panel Admin | `/admin/*` | Admin | Kelola karyawan (+ foto), kenangan, pesan (tambah & hapus), dan akun user |
 | Tidak ditemukan | `*` | Publik | Pesan "Halaman tidak ditemukan" dan tombol ke Home |
 
@@ -215,7 +220,7 @@ DETAIL KARYAWAN (USER LOGIN)
 - **Toast** muncul di pojok untuk hasil aksi: sukses (hijau), gagal (merah).
 - **Form admin & login:** tiap kolom punya label, pesan error dalam bahasa Indonesia tepat di bawah kolom, dan tombol Simpan/Masuk nonaktif saat sedang memproses.
 - **Aksesibilitas dasar:** kontras teks cukup, semua tombol bisa dipakai dengan keyboard, gambar atau ikon bermakna punya teks alternatif.
-- **Menu atas:** pengunjung yang belum login hanya melihat Home dan tombol Masuk. Setelah login, menu menampilkan Home, Karyawan, Kenangan, Pesan dan Kesan, serta **nama user dan tombol Keluar** di header (admin juga melihat tautan Panel Admin).
+- **Menu atas:** pengunjung yang belum login melihat Home, tombol/tautan Daftar (`/register`), dan tombol Masuk (`/login`). Setelah login, menu menampilkan Home, Karyawan, Kenangan, Pesan dan Kesan, serta **nama user dan tombol Keluar** di header (admin juga melihat tautan Panel Admin).
 
 ## 8. Database Overview
 
@@ -242,7 +247,7 @@ Database: MySQL, diakses lewat library `mysql2`. Ada 5 tabel. Semua tabel memaka
 - `contact`, `hobby`, `hometown`, `impression`, `favorite_quote`, dan `photo_url` boleh kosong (`NULL`). Kolom lain wajib diisi.
 - Foto tidak disimpan di database. Kolom `photo_url` hanya berisi alamat file di penyimpanan eksternal.
 - Index tambahan: `employees.full_name` (untuk pencarian) dan `memories.event_date` (untuk urutan).
-- Tidak ada registrasi publik; akun `user` dibuat oleh admin melalui Panel Admin. Akun `admin` hanya dibuat lewat file seed.
+- Pendaftaran akun `user` tersedia secara mandiri melalui `POST /api/auth/register` (otomatis `role = 'user'`, `employee_id = NULL`, dan **`is_active = 0`** menunggu persetujuan Admin) maupun dibuat langsung oleh Admin melalui Panel Admin (`is_active = 1`). Akun `admin` hanya dibuat lewat file seed.
 - Siapkan file seed berisi 1 akun admin dan data contoh karyawan, kenangan, pesan antar karyawan, serta user agar bisa didemokan.
 
 ## 9. Technical Requirements
@@ -302,6 +307,7 @@ Semua dimulai dengan `/api`. Respons selalu berbentuk `{ success, data, message 
 | GET | `/employees/:id` | User atau Admin | Detail biodata karyawan + foto + pesan terkait + kenangan (wajib token login) |
 | GET | `/memories` dan `/memories/:id` | User atau Admin | Daftar dan detail kenangan terbit (wajib token login) |
 | GET | `/messages` | User atau Admin | Semua pesan terbit beserta info karyawan pengirim dan penerima (wajib token login) |
+| POST | `/auth/register` | Publik | Pendaftaran akun user baru (`is_active = false`, menunggu aktivasi admin) |
 | POST | `/auth/login` | Publik | Kirim email dan password, terima token JWT |
 | GET | `/auth/me` | User atau Admin | Cek token masih valid, kembalikan data akun |
 | GET, POST, PUT, DELETE | `/admin/employees`, `/admin/memories` | Admin | Kelola data karyawan dan kenangan (daftar admin juga memuat draft) |
@@ -315,16 +321,17 @@ Semua dimulai dengan `/api`. Respons selalu berbentuk `{ success, data, message 
   - Password wajib di-crypt (di-hash) menggunakan `bcryptjs` (salt rounds: 10) dan jangan pernah disimpan sebagai plaintext.
   - Token JWT ditandatangani dan diverifikasi menggunakan `JWT_SECRET` yang aman (berlaku 1 hari / `1d`).
   - Validasi akun user: nama minimal 5 karakter, email minimal 5 karakter (format email valid), password minimal 6 karakter.
-  - Semua query memakai parameter (`?`) agar kebal SQL injection, login dibatasi 5 percobaan per menit, CORS hanya untuk alamat client.
+  - Semua query memakai parameter (`?`) agar kebal SQL injection, login dan registrasi masing-masing dibatasi 5 percobaan per menit, CORS hanya untuk alamat client.
   - Server memeriksa token dan role (`admin` atau `user`) serta status `is_active` pada setiap endpoint terproteksi.
-  - Tanpa token valid, publik hanya bisa mengakses `POST /auth/login` dan `GET /photos` (yang hanya mengembalikan foto-foto tanpa biodata).
+  - Tanpa token valid, publik hanya bisa mengakses `POST /auth/register`, `POST /auth/login`, dan `GET /photos` (yang hanya mengembalikan foto-foto tanpa biodata).
+  - Akun hasil `POST /auth/register` wajib memaksa `role = 'user'`, `employee_id = NULL`, dan `is_active = 0` di server (abaikan field `role` / `is_active` / `employee_id` jika dikirim client).
   - User dengan role `user` hanya melihat data berstatus `published`; data `draft` hanya terlihat oleh `admin`.
 - **Validasi dua lapis:** Zod di form (cek cepat untuk pengguna) dan Zod di server (pengaman sebenarnya).
 - **Error (Setting Default):** Server menggunakan kode HTTP standar (`400` input/file tidak valid, `401` belum login/token tidak valid atau kedaluwarsa, `403` akses ditolak/role tidak cukup/akun nonaktif, `404` data tidak ditemukan atau masih `draft` untuk non-admin, `409` konflik data unik seperti email duplikat, `429` terlalu banyak percobaan login, `500` error server). Client menampilkan pesan bahasa Indonesia yang ramah lewat toast.
 - **Environment (`.env`):** `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `JWT_SECRET`, `CLIENT_URL`, `BLOB_READ_WRITE_TOKEN` (Vercel Blob) di server; `VITE_API_URL` di client. File `.env` tidak boleh masuk Git; sediakan `.env.example`.
 - **TypeScript:** mode `strict` aktif, tidak memakai tipe `any`.
-- **Deploy di Vercel:** client dan server di-deploy sebagai dua project Vercel. Express dijalankan sebagai serverless function (`app.ts` mengekspor app, ada `vercel.json` untuk mengarahkan `/api`). Vercel tidak menyediakan MySQL, jadi database harus di-host di layanan eksternal yang bisa diakses dari internet (misalnya Railway, Aiven, atau TiDB Cloud), dengan ukuran pool kecil karena serverless membuat banyak koneksi.
-- **Upload foto:** hanya admin yang boleh (server memeriksa role). Format JPG, PNG, atau WebP, maksimal 2 MB, dicek di client dan di server. Vercel tidak menyimpan file di server secara permanen, jadi foto disimpan di **Vercel Blob** dan database hanya menyimpan URL-nya.
+- **Deploy ke Vercel (Ditangguhkan terlebih dahulu):** Fokus pengembangan & pengujian pada environment lokal (`client` + `server` + MySQL lokal); konfigurasi/deployment ke Vercel akan dikerjakan pada fase terpisah setelah fitur selesai.
+- **Upload foto:** hanya admin yang boleh (server memeriksa role). Format JPG, PNG, atau WebP, maksimal 2 MB, dicek di client dan di server. Untuk penyimpanan eksternal dapat memakai Vercel Blob atau fallback lokal selama pengembangan.
 
 ## 10. Definisi Selesai, Tahapan, dan Risiko
 
@@ -334,24 +341,24 @@ Proyek dianggap selesai (MVP) jika semua kotak di bawah tercentang.
 
 - [ ] Seluruh fitur F1 sampai F6 lulus kriteria penerimaan masing-masing.
 - [ ] Frontend dibangun menggunakan Vite + React 19 + TypeScript, TanStack Query, dan **Zustand** (tanpa React Context dan tanpa `useReducer`).
-- [ ] Minimal 10 akun user dibuat oleh admin, minimal 10 karyawan terisi lengkap (target 25), minimal 5 kenangan terbit, dan minimal 10 pesan dan kesan terbit.
-- [ ] Halaman Home (`/`), halaman Login (`/login`), seluruh halaman user yang terproteksi, dan Panel Admin tampil benar di HP (lebar 360 px) dan desktop, tanpa teks terpotong.
-- [ ] Pengunjung yang belum login hanya dapat melihat foto-foto di halaman Home (`/`) dan halaman Login (`/login`), serta tidak dapat mengakses daftar/biodata karyawan, kenangan, pesan dan kesan, maupun Panel Admin.
+- [ ] Minimal 10 akun user aktif (dibuat admin atau mendaftar via `/register` lalu diaktifkan admin), minimal 10 karyawan terisi lengkap (target 25), minimal 5 kenangan terbit, dan minimal 10 pesan dan kesan terbit.
+- [ ] Halaman Home (`/`), halaman Login (`/login`), halaman Registrasi (`/register`), seluruh halaman user yang terproteksi, dan Panel Admin tampil benar di HP (lebar 360 px) dan desktop, tanpa teks terpotong.
+- [ ] Pengunjung yang belum login hanya dapat melihat foto-foto di halaman Home (`/`), halaman Login (`/login`), dan mengajukan registrasi di `/register` (status awal nonaktif hingga disetujui admin), serta tidak dapat mengakses daftar/biodata karyawan, kenangan, pesan dan kesan, maupun Panel Admin.
 - [ ] Semua user yang sudah login dapat melihat semua data terbit (karyawan, biodata, kenangan, pesan antar karyawan) dan tidak dapat menambah, mengubah, atau menghapus data apa pun.
 - [ ] Admin dapat menambah dan menghapus pesan antar karyawan (1 karyawan dapat memiliki banyak pesan untuk karyawan lainnya) tanpa fitur edit pesan, serta user biasa tidak dapat mengakses `/admin/*`.
-- [ ] Sudah ter-deploy di Vercel (client, server, dan Vercel Blob untuk foto) dan bisa dibuka lewat satu link publik.
+- [ ] *(Ditangguhkan terlebih dahulu)* Deploy ke Vercel (client, server, dan Vercel Blob untuk foto).
 - [ ] Password admin bukan password dari file seed, dan file `.env` tidak ada di Git.
-- [ ] README menjelaskan cara menjalankan di komputer lokal dan cara deploy.
+- [ ] README menjelaskan cara menjalankan di komputer lokal dan struktur aplikasi.
 
 ### Tahapan pengerjaan
 
 Kerjakan berurutan. Jangan lanjut ke tahap berikutnya sebelum tahap sebelumnya bisa dites.
 
 1. **Persiapan:** buat repo, folder `client` (Vite + React 19 + TypeScript + Zustand) dan `server`, koneksi MySQL, file `schema.sql` (5 tabel) dan `seed.sql`. Selesai jika server menyala dan bisa membaca satu tabel.
-2. **Login & Keamanan:** endpoint `/auth/login` dan `/auth/me`, hash password, JWT, role admin dan user, pengecekan `is_active`, rate limit 5x/menit, serta middleware pelindung. Selesai jika endpoint terproteksi ditolak (`401`/`403`) tanpa token atau role yang sesuai.
+2. **Registrasi, Login & Keamanan:** endpoint `/auth/register`, `/auth/login`, dan `/auth/me`, hash password, JWT, role admin dan user, pengecekan `is_active`, rate limit 5x/menit, serta middleware pelindung. Selesai jika pendaftar baru berstatus `is_active = false`, baru bisa login setelah diaktifkan admin, dan endpoint terproteksi ditolak (`401`/`403`) tanpa token atau role yang sesuai.
 3. **API Foto Publik & Data Login:** endpoint `GET /photos` (publik, hanya URL foto) serta endpoint `GET` khusus login untuk karyawan (`/employees`, `/employees/:id`), kenangan (`/memories`, `/memories/:id`), dan pesan (`/messages`). Selesai jika pengunjung tanpa token hanya bisa mengambil `GET /photos` dan ditolak (`401`) di endpoint data lain.
-4. **API Admin:** tambah, ubah, hapus untuk karyawan (+ unggah foto ke penyimpanan eksternal), kenangan, akun user, serta tambah & hapus pesan (tanpa edit pesan), lengkap dengan validasi Zod. Selesai jika input salah dan file foto yang tidak sesuai ditolak dengan pesan jelas.
-5. **Halaman Home, Login, & Halaman User:** layout, header (nama user + tombol Keluar saat login), Zustand `authStore`, halaman Home (`/`) berisi foto-foto untuk publik, halaman Login (`/login`), serta halaman terproteksi (`/karyawan`, `/karyawan/:id`, `/kenangan`, `/kenangan/:id`, `/pesan`) dengan TanStack Query. Selesai jika pengunjung hanya bisa melihat foto-foto di Home & Login, semua halaman data punya kondisi loading, kosong, dan error, serta user login bisa melihat semua data.
+4. **API Admin:** tambah, ubah, hapus untuk karyawan (+ unggah foto), kenangan, akun user (termasuk aktivasi pendaftar baru), serta tambah & hapus pesan (tanpa edit pesan), lengkap dengan validasi Zod. Selesai jika input salah dan file foto yang tidak sesuai ditolak dengan pesan jelas.
+5. **Halaman Home, Registrasi, Login, & Halaman User:** layout, header (nama user + tombol Keluar saat login), Zustand `authStore`, halaman Home (`/`) berisi foto-foto untuk publik, halaman Registrasi (`/register`), halaman Login (`/login`), serta halaman terproteksi (`/karyawan`, `/karyawan/:id`, `/kenangan`, `/kenangan/:id`, `/pesan`) dengan TanStack Query. Selesai jika pengunjung hanya bisa melihat foto-foto di Home, Login, & Registrasi, semua halaman data punya kondisi loading, kosong, dan error, serta user login bisa melihat semua data.
 6. **Panel admin:** shell `/admin/*`, tabel dan form (React Hook Form + Zod), toast, konfirmasi hapus, kelola karyawan + foto, kenangan, pesan (tambah & hapus saja), dan akun user. Selesai jika admin bisa mengelola semua data dan akun user dari browser.
 7. **Isi data dan uji:** masukkan data asli, tes manual semua alur di HP dan desktop. Selesai jika definisi selesai di atas tercentang.
 8. **Deploy:** siapkan database eksternal, deploy server lalu client, atur environment variable. Selesai jika website bisa dibuka dari HP lewat link publik.

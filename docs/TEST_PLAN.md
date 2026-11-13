@@ -16,12 +16,13 @@ Memastikan seluruh fitur MVP (F1–F6), aturan hak akses (Pengunjung, User, Admi
 | --- | --- | --- | --- |
 | `/` (Home) & `GET /api/photos` | **Boleh** (hanya lihat foto-foto & tombol Masuk) | **Boleh** (lihat menu & ringkasan) | **Boleh** |
 | `/login` & `POST /api/auth/login` | **Boleh** (rate limit 5x/menit) | **Boleh** (redirect bila sudah login) | **Boleh** |
+| `/register` & `POST /api/auth/register` | **Boleh** (rate limit 5x/menit, status awal `is_active = false`) | **Redirect** (`/karyawan` bila sudah login) | **Redirect** |
 | `*` (URL tidak ada) | **Boleh** (halaman "tidak ditemukan") | **Boleh** | **Boleh** |
 | `/karyawan`, `/karyawan/:id` & `GET /api/employees*` | **Ditolak** (`401` API, redirect `/login` di UI) | **Boleh** (hanya `published`) | **Boleh** |
 | `/kenangan`, `/kenangan/:id` & `GET /api/memories*` | **Ditolak** (`401` API, redirect `/login` di UI) | **Boleh** (hanya `published`) | **Boleh** |
 | `/pesan` & `GET /api/messages` | **Ditolak** (`401` API, redirect `/login` di UI) | **Boleh** (baca seluruh pesan terbit) | **Boleh** (lihat semua pesan) |
 | `/admin/*` & `/api/admin/*` | **Ditolak** (`401` API, redirect `/login` di UI) | **Ditolak** (`403` API, ditolak di UI) | **Boleh** (termasuk data `draft`) |
-| `/daftar` & `POST /api/auth/register` | **Tidak Ada** (`404` / `*`) | **Tidak Ada** | **Tidak Ada** |
+| `/daftar`, `/akun` | **Tidak Ada** (`404` / `*`) | **Tidak Ada** | **Tidak Ada** |
 
 ---
 
@@ -39,7 +40,11 @@ Memastikan seluruh fitur MVP (F1–F6), aturan hak akses (Pengunjung, User, Admi
 | `TC-AUTH-06` | Akun dinonaktifkan (`is_active = 0`) | Admin menonaktifkan user, lalu user mencoba login atau memakai token JWT lama ke `GET /api/auth/me`. | Login maupun endpoint terproteksi menolak dengan `403` dan sesi client dibersihkan. |
 | `TC-AUTH-07` | Token kedaluwarsa (`401`) | Gunakan token kedaluwarsa/rusak lalu muat ulang halaman atau panggil endpoint terproteksi. | Server membalas `401`, Zustand `authStore` dikosongkan, dan browser otomatis mengarahkan ke `/login`. |
 | `TC-AUTH-08` | Logout | Klik tombol `Keluar` di header saat sedang login. | Token & data user di Zustand dihapus, pengguna kembali melihat tampilan pengunjung (Home + Masuk), rute terproteksi tidak bisa diakses lagi. |
-| `TC-AUTH-09` | Tidak ada halaman registrasi & Akun Saya | Akses `/daftar`, `/akun`, dan `POST /api/auth/register`. | Frontend menampilkan halaman `NotFound` (`*`), API mengembalikan `404`. |
+| `TC-AUTH-09` | Tidak ada halaman Akun Saya & `/daftar` | Akses `/daftar` dan `/akun` di browser. | Frontend menampilkan halaman `NotFound` (`*`) bahasa Indonesia. |
+| `TC-AUTH-10` | Registrasi user baru sukses (`is_active = false`) | Buka `/register`, isi `name` (>= 5), `email` valid (>= 5), `password` (>= 6), & konfirmasi cocok, klik Daftar. | `POST /api/auth/register` mengembalikan `201 Created` dengan `role: 'user'`, `employee_id: null`, `is_active: false`, **tanpa** token JWT maupun `password_hash`; UI menampilkan pesan menunggu persetujuan admin. |
+| `TC-AUTH-11` | Pendaftar baru ditolak login sebelum diaktifkan Admin, berhasil setelah diaktifkan | Coba login pakai akun hasil registrasi sebelum diaktifkan Admin -> lalu Admin mengaktifkan lewat `PUT /api/admin/users/:id` (`is_active: true`) -> coba login lagi. | Login sebelum aktivasi ditolak `403 Forbidden`; setelah diaktifkan Admin, login berhasil (`200 OK`) dan menerima JWT. |
+| `TC-AUTH-12` | Validasi & proteksi privilege escalation pada registrasi | Kirim `POST /api/auth/register` dengan nama/password pendek, email duplikat, serta payload mencurigakan `{ role: 'admin', is_active: true }`. | Input tidak valid -> `400`; email duplikat -> `409 Conflict`; payload `role`/`is_active` diabaikan server sehingga akun tetap `role: 'user'` dan `is_active: false`. |
+| `TC-AUTH-13` | Rate limit registrasi (5x/menit) | Kirim `POST /api/auth/register` sebanyak 6 kali dalam 1 menit dari IP sama. | Percobaan ke-6 ditolak server dengan HTTP `429` dan pesan ramah bahasa Indonesia. |
 
 ---
 
@@ -135,9 +140,9 @@ Seluruh poin berikut wajib bernilai **LULUS** sebelum proyek dinyatakan selesai:
 - [ ] Fitur **F1 sampai F6** lulus seluruh test case terkait di atas.
 - [ ] Frontend menggunakan **Vite + React 19 + TypeScript (`strict`, tanpa `any`)**, **TanStack Query**, dan **Zustand** (terverifikasi tidak ada `React Context` dan `useReducer`).
 - [ ] Data peluncuran terpenuhi: minimal **10 akun user**, minimal **10 karyawan lengkap (target 25)**, minimal **5 kenangan terbit**, dan minimal **10 pesan & kesan**.
-- [ ] Pengunjung belum login hanya bisa melihat foto-foto di Home (`/`) dan Login (`/login`).
+- [ ] Pengunjung belum login hanya bisa melihat foto-foto di Home (`/`), Login (`/login`), dan mengajukan registrasi di `/register` (status awal nonaktif menunggu aktivasi Admin).
 - [ ] User login bisa membaca semua data terbit dan tidak dapat menambah, mengubah, atau menghapus data apa pun.
-- [ ] Admin dapat mengelola seluruh data, foto ke Vercel Blob, akun user, dan menghapus pesan.
-- [ ] Tampilan teruji di `360px` (HP) dan desktop tanpa error serta waktu muat utama < 3 detik (Lighthouse).
-- [ ] Ter-deploy di Vercel (client, server, MySQL eksternal, Vercel Blob), password admin bukan password seed, `.env` tidak masuk Git, dan `README.md` tersedia.
+- [ ] Admin dapat mengelola seluruh data, foto karyawan, akun user (termasuk aktivasi pendaftar baru), dan menghapus pesan.
+- [ ] Tampilan teruji di `360px` (HP) dan desktop tanpa error.
+- [ ] Password admin bukan password seed, `.env` tidak masuk Git, dan `README.md` tersedia. *(Catatan: Deployment ke Vercel ditangguhkan terlebih dahulu).*
 

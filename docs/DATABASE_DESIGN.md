@@ -87,7 +87,7 @@ erDiagram
 
 ### 3.1 `users`
 
-Menyimpan akun login untuk admin (1 baris dari seed) dan user (mantan karyawan yang dibuat dan dikelola oleh admin).
+Menyimpan akun login untuk admin (1 baris dari seed) dan user (mantan karyawan yang mendaftar via `/register` dengan status awal `is_active = 0` menunggu persetujuan admin, atau yang dibuat langsung oleh admin dengan `is_active = 1`).
 
 | Kolom | Tipe Data | Constraint | Keterangan |
 | --- | --- | --- | --- |
@@ -95,9 +95,9 @@ Menyimpan akun login untuk admin (1 baris dari seed) dan user (mantan karyawan y
 | `name` | `VARCHAR(150)` | `NOT NULL` | Nama user (ditampilkan di header saat login) |
 | `email` | `VARCHAR(255)` | `NOT NULL UNIQUE` | Email login, wajib unik |
 | `password_hash` | `VARCHAR(255)` | `NOT NULL` | Hash bcrypt dari password (jangan simpan plaintext) |
-| `role` | `ENUM('admin', 'user')` | `NOT NULL DEFAULT 'user'` | Peran akun (`admin` hanya dari seed) |
+| `role` | `ENUM('admin', 'user')` | `NOT NULL DEFAULT 'user'` | Peran akun (`admin` hanya dari seed; registrasi selalu `'user'`) |
 | `employee_id` | `INT UNSIGNED` | `NULL UNIQUE` | Tautan opsional ke `employees.id` (`ON DELETE SET NULL`) |
-| `is_active` | `TINYINT(1)` | `NOT NULL DEFAULT 1` | Status aktif akun (`1` aktif, `0` dinonaktifkan admin) |
+| `is_active` | `TINYINT(1)` | `NOT NULL DEFAULT 1` | Status aktif akun (`1` aktif, `0` nonaktif / menunggu persetujuan admin saat registrasi mandiri) |
 | `created_at` | `TIMESTAMP` | `NOT NULL DEFAULT CURRENT_TIMESTAMP` | Waktu pembuatan akun |
 | `updated_at` | `TIMESTAMP` | `NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP` | Waktu pembaruan terakhir |
 

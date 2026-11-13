@@ -77,24 +77,40 @@ export function Header() {
               </button>
             </>
           ) : (
-            <Link
-              to="/login"
-              className="inline-flex items-center justify-center rounded-lg bg-[#E32636] px-5 py-2 text-base font-medium text-white hover:bg-[#C81E2D] transition-colors"
-            >
-              Masuk
-            </Link>
+            <div className="flex items-center gap-3">
+              <Link
+                to="/register"
+                className="rounded-lg border border-[#8ECDF2] px-4 py-2 text-base font-medium text-slate-800 hover:bg-[#EBF7FE] transition-colors"
+              >
+                Daftar
+              </Link>
+              <Link
+                to="/login"
+                className="inline-flex items-center justify-center rounded-lg bg-[#E32636] px-5 py-2 text-base font-medium text-white hover:bg-[#C81E2D] transition-colors"
+              >
+                Masuk
+              </Link>
+            </div>
           )}
         </div>
 
         {/* Tombol Menu Mobile */}
         <div className="flex md:hidden items-center gap-2">
           {!isAuthenticated && (
-            <Link
-              to="/login"
-              className="inline-flex items-center justify-center rounded-lg bg-[#E32636] px-4 py-1.5 text-base font-medium text-white hover:bg-[#C81E2D] transition-colors"
-            >
-              Masuk
-            </Link>
+            <>
+              <Link
+                to="/register"
+                className="rounded-lg border border-[#8ECDF2] px-3 py-1.5 text-base font-medium text-slate-800 hover:bg-[#EBF7FE] transition-colors"
+              >
+                Daftar
+              </Link>
+              <Link
+                to="/login"
+                className="inline-flex items-center justify-center rounded-lg bg-[#E32636] px-4 py-1.5 text-base font-medium text-white hover:bg-[#C81E2D] transition-colors"
+              >
+                Masuk
+              </Link>
+            </>
           )}
           {isAuthenticated && (
             <button

@@ -27,8 +27,8 @@ Dokumen ini mendefinisikan kontrak REST API berdasarkan [PRD.md](file:///c:/User
   *(Untuk error validasi Zod `400`, `data` dapat menyertakan `{ "errors": { "field": "pesan" } }` agar form client dapat menampilkan error di bawah kolom terkait, sementara `message` tetap berisi ringkasan ramah dalam bahasa Indonesia.)*
 - **Autentikasi:** JWT Bearer Token pada header `Authorization: Bearer <token>`, masa berlaku **1 hari** (`1d`).
 - **Keamanan Wajib:**
-  - Seluruh endpoint selain `GET /api/photos` dan `POST /api/auth/login` wajib menyertakan token JWT valid **dan** status akun aktif (`is_active = 1`).
-  - Rate limiting pada `POST /api/auth/login`: maksimal **5 percobaan per menit**.
+  - Seluruh endpoint selain `GET /api/photos`, `POST /api/auth/register`, dan `POST /api/auth/login` wajib menyertakan token JWT valid **dan** status akun aktif (`is_active = 1`).
+  - Rate limiting pada `POST /api/auth/login` dan `POST /api/auth/register`: maksimal **5 percobaan per menit**.
   - Validasi input menggunakan **Zod** di server pada seluruh endpoint `POST`/`PUT`.
   - Seluruh query MySQL wajib menggunakan *parameterized query* (`?`).
   - `cors` hanya mengizinkan origin `CLIENT_URL`; proteksi header menggunakan `helmet`.
@@ -42,7 +42,7 @@ Dokumen ini mendefinisikan kontrak REST API berdasarkan [PRD.md](file:///c:/User
   - `429 Too Many Requests`: Melebihi batas percobaan login (5x/menit).
   - `500 Internal Server Error`: Kesalahan server.
 
-> **Catatan Scope PRD:** Tidak ada endpoint registrasi publik (`POST /api/auth/register`), tidak ada endpoint tulis/ubah/hapus pesan oleh user (`/api/messages` hanya `GET`), dan tidak ada endpoint edit pesan (`PUT`/`PATCH`) di mana pun.
+> **Catatan Scope PRD:** Akun hasil `POST /api/auth/register` selalu memiliki `role = 'user'`, `employee_id = NULL`, dan `is_active = false` (menunggu persetujuan Admin melalui Panel Admin). Tetap tidak ada endpoint tulis/ubah/hapus pesan oleh user (`/api/messages` hanya `GET`), dan tidak ada endpoint edit pesan (`PUT`/`PATCH`) di mana pun.
 
 ---
 
@@ -102,6 +102,48 @@ Dokumen ini mendefinisikan kontrak REST API berdasarkan [PRD.md](file:///c:/User
     "message": "Login berhasil"
   }
   ```
+
+### 2.3 `POST /api/auth/register`
+- **Akses:** Publik (Rate limit: maksimal 5 percobaan per menit per IP)
+- **Deskripsi:** Mendaftarkan akun user baru dengan status awal nonaktif (`is_active = false`), sehingga user **belum dapat login** sampai disetujui/diaktifkan oleh Admin melalui `PUT /api/admin/users/:id`.
+- **Body Request (Zod):**
+  ```json
+  {
+    "name": "Budi Santoso",
+    "email": "budi@example.com",
+    "password": "password123"
+  }
+  ```
+- **Validasi Input (Zod):**
+  - `name`: string (`trim`), minimal 5 karakter, maksimal 150 karakter (`z.string().trim().min(5).max(150)`).
+  - `email`: string (`trim`, dinormalisasi huruf kecil), format email valid, minimal 5 karakter, maksimal 255 karakter (`z.string().trim().toLowerCase().min(5).max(255).email()`).
+  - `password`: string, minimal 6 karakter, maksimal 100 karakter (`z.string().min(6).max(100)`).
+- **Aturan Keamanan:**
+  - Server **wajib mengabaikan** field `role`, `is_active`, atau `employee_id` jika dikirim oleh client, dan memaksa `role = 'user'`, `is_active = 0` (`false`), serta `employee_id = NULL`.
+  - Cek keunikan email (case-insensitive). Jika email sudah terdaftar, tolak dengan `409 Conflict` (`"Email sudah digunakan"`).
+  - Password di-hash menggunakan `bcryptjs` (`salt rounds: 10`) sebelum disimpan ke `password_hash`.
+  - **Jangan** mengembalikan token JWT dan **jangan** mengembalikan `password_hash`.
+- **Respons `201 Created`:**
+  ```json
+  {
+    "success": true,
+    "data": {
+      "id": 12,
+      "name": "Budi Santoso",
+      "email": "budi@example.com",
+      "role": "user",
+      "employee_id": null,
+      "employeeId": null,
+      "is_active": false,
+      "isActive": false
+    },
+    "message": "Registrasi berhasil. Akun Anda menunggu persetujuan admin sebelum dapat digunakan untuk masuk."
+  }
+  ```
+- **Respons Error Umum:**
+  - `400 Bad Request`: input tidak valid (mis. nama < 5 karakter, format email salah, password < 6 karakter).
+  - `409 Conflict`: `{ "success": false, "data": null, "message": "Email sudah digunakan" }`.
+  - `429 Too Many Requests`: melebihi 5 percobaan per menit per IP.
 
 ---
 

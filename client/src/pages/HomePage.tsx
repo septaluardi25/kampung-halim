@@ -128,12 +128,18 @@ export function HomePage() {
               lengkap rekan kerja, cerita kenangan bersama, serta pesan dan
               kesan.
             </p>
-            <div className="pt-1">
+            <div className="pt-1 flex flex-wrap items-center gap-3">
               <Link
                 to="/login"
                 className="inline-flex items-center justify-center rounded-xl bg-[#E32636] px-6 py-3 text-base font-semibold text-white hover:bg-[#C81E2D] transition-colors shadow-xs"
               >
                 Masuk untuk Membuka Data
+              </Link>
+              <Link
+                to="/register"
+                className="inline-flex items-center justify-center rounded-xl border border-[#8ECDF2] bg-white px-5 py-3 text-base font-semibold text-slate-800 hover:bg-[#EBF7FE] transition-colors"
+              >
+                Daftar Akun Baru
               </Link>
             </div>
           </div>

@@ -19,3 +19,18 @@ export interface LoginResponseData {
   user: AuthUser;
 }
 
+export interface RegisterRequest {
+  name: string;
+  email: string;
+  password: string;
+}
+
+export interface RegisterResponseData {
+  id: number;
+  name: string;
+  email: string;
+  role: UserRole;
+  employee_id: number | null;
+  is_active: boolean;
+}
+

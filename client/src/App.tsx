@@ -11,6 +11,7 @@ import { MemoriesPage } from './pages/MemoriesPage';
 import { MemoryDetailPage } from './pages/MemoryDetailPage';
 import { MessagesPage } from './pages/MessagesPage';
 import { NotFoundPage } from './pages/NotFoundPage';
+import { RegisterPage } from './pages/RegisterPage';
 import { AdminRoute } from './routes/AdminRoute';
 import { ProtectedRoute } from './routes/ProtectedRoute';
 import { useAuthStore } from './stores/authStore';
@@ -22,6 +23,7 @@ export function AppRoutes() {
         {/* Rute Publik */}
         <Route path="/" element={<HomePage />} />
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/register" element={<RegisterPage />} />
 
         {/* Rute Terlindungi (User & Admin) */}
         <Route element={<ProtectedRoute />}>

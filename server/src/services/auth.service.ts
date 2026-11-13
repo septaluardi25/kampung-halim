@@ -1,10 +1,10 @@
 import jwt from 'jsonwebtoken';
-import type { RowDataPacket } from 'mysql2';
+import type { ResultSetHeader, RowDataPacket } from 'mysql2';
 import { env } from '../config/env';
 import { pool } from '../db/pool';
-import type { LoginInput } from '../schemas/auth.schema';
+import type { LoginInput, RegisterInput } from '../schemas/auth.schema';
 import type { UserRole } from '../types/express';
-import { verifyPassword } from '../utils/crypt';
+import { hashPassword, verifyPassword } from '../utils/crypt';
 
 interface UserAuthRow extends RowDataPacket {
   id: number;
@@ -72,6 +72,39 @@ function mapUserProfile(row: {
   };
 }
 
+export async function registerUser(
+  input: RegisterInput
+): Promise<AuthUserProfile> {
+  const normalizedEmail = input.email.trim().toLowerCase();
+  const normalizedName = input.name.trim();
+
+  const [existingRows] = await pool.query<RowDataPacket[]>(
+    `SELECT id FROM users WHERE LOWER(email) = ? LIMIT 1`,
+    [normalizedEmail]
+  );
+
+  if (existingRows.length > 0) {
+    throw new AuthServiceError(409, 'Email sudah digunakan');
+  }
+
+  const passwordHash = await hashPassword(input.password);
+
+  const [insertResult] = await pool.query<ResultSetHeader>(
+    `INSERT INTO users (name, email, password_hash, role, employee_id, is_active)
+     VALUES (?, ?, ?, 'user', NULL, 0)`,
+    [normalizedName, normalizedEmail, passwordHash]
+  );
+
+  return mapUserProfile({
+    id: insertResult.insertId,
+    name: normalizedName,
+    email: normalizedEmail,
+    role: 'user',
+    employee_id: null,
+    is_active: 0,
+  });
+}
+
 export async function loginUser(input: LoginInput): Promise<LoginResult> {
   const normalizedEmail = input.email.trim().toLowerCase();
 
@@ -101,7 +134,7 @@ export async function loginUser(input: LoginInput): Promise<LoginResult> {
   if (user.is_active !== 1) {
     throw new AuthServiceError(
       403,
-      'Akun Anda telah dinonaktifkan. Silakan hubungi admin'
+      'Akun Anda belum aktif atau telah dinonaktifkan. Silakan hubungi admin'
     );
   }
 

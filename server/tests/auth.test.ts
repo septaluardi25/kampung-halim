@@ -1,11 +1,16 @@
 import express from 'express';
 import jwt from 'jsonwebtoken';
+import type { RowDataPacket } from 'mysql2';
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 import app from '../src/app';
 import { env } from '../src/config/env';
 import { pool } from '../src/db/pool';
-import { createLoginRateLimiter } from '../src/middleware/rateLimiter';
+import {
+  createLoginRateLimiter,
+  createRegisterRateLimiter,
+} from '../src/middleware/rateLimiter';
+import { verifyPassword } from '../src/utils/crypt';
 import { loginAs, seedAdmin, seedEmployee, seedUser } from './setup';
 
 describe('Auth APIs', () => {
@@ -153,13 +158,6 @@ describe('Auth APIs', () => {
     expect(res.body.data.role).toBe('admin');
   });
 
-  it('AUTH-09: POST /api/auth/register -> 404 (sesuai PRD tidak ada registrasi publik)', async () => {
-    const res = await request(app)
-      .post('/api/auth/register')
-      .send({ name: 'Andi Budi', email: 'andi@gmail.com', password: 'password123' });
-    expect(res.status).toBe(404);
-  });
-
   it('AUTH-10: Token dengan alg: none / secret salah ditolak -> 401', async () => {
     // Wrong secret
     const wrongSecretToken = jwt.sign(
@@ -178,5 +176,141 @@ describe('Auth APIs', () => {
       .get('/api/auth/me')
       .set('Authorization', `Bearer ${forgedToken}`);
     expect(resNone.status).toBe(401);
+  });
+
+  it('REG-01: POST /api/auth/register valid -> 201, role user, is_active false, hash bcrypt, tanpa token & password_hash', async () => {
+    const res = await request(app).post('/api/auth/register').send({
+      name: 'Budi Santoso',
+      email: 'Budi@WargaHalim.id',
+      password: 'UserPass123!',
+    });
+
+    expect(res.status).toBe(201);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.name).toBe('Budi Santoso');
+    expect(res.body.data.email).toBe('budi@wargahalim.id');
+    expect(res.body.data.role).toBe('user');
+    expect(res.body.data.employee_id).toBeNull();
+    expect(res.body.data.is_active).toBe(false);
+    expect(res.body.data.token).toBeUndefined();
+    expect(res.body.data.password_hash).toBeUndefined();
+
+    const [rows] = await pool.query<RowDataPacket[]>(
+      'SELECT password_hash, role, employee_id, is_active FROM users WHERE email = ?',
+      ['budi@wargahalim.id']
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].role).toBe('user');
+    expect(rows[0].employee_id).toBeNull();
+    expect(rows[0].is_active).toBe(0);
+    expect(rows[0].password_hash).not.toBe('UserPass123!');
+    expect(await verifyPassword('UserPass123!', rows[0].password_hash)).toBe(true);
+  });
+
+  it('REG-02: Email duplikat (case-insensitive) ditolak -> 409 Conflict', async () => {
+    const first = await request(app).post('/api/auth/register').send({
+      name: 'Budi Santoso',
+      email: 'budi@wargahalim.id',
+      password: 'UserPass123!',
+    });
+    expect(first.status).toBe(201);
+
+    const dup = await request(app).post('/api/auth/register').send({
+      name: 'Budi Kedua',
+      email: 'BUDI@WargaHalim.ID',
+      password: 'UserPass123!',
+    });
+    expect(dup.status).toBe(409);
+    expect(dup.body.success).toBe(false);
+  });
+
+  it('REG-03: Validasi Zod registrasi gagal -> 400 Bad Request', async () => {
+    const resShort = await request(app).post('/api/auth/register').send({
+      name: 'Abc',
+      email: 'salah',
+      password: '123',
+    });
+    expect(resShort.status).toBe(400);
+    expect(resShort.body.data.errors).toBeDefined();
+
+    const resEmpty = await request(app).post('/api/auth/register').send({});
+    expect(resEmpty.status).toBe(400);
+  });
+
+  it('REG-04: Proteksi privilege escalation pada body registrasi diabaikan server', async () => {
+    const empId = await seedEmployee('Karyawan Uji');
+
+    const res = await request(app).post('/api/auth/register').send({
+      name: 'Penyusup Uji',
+      email: 'penyusup@wargahalim.id',
+      password: 'UserPass123!',
+      role: 'admin',
+      is_active: true,
+      employee_id: empId,
+    });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.role).toBe('user');
+    expect(res.body.data.is_active).toBe(false);
+    expect(res.body.data.employee_id).toBeNull();
+  });
+
+  it('REG-05 & REG-06: Pendaftar baru ditolak login (403) sebelum aktivasi Admin, berhasil (200) setelah diaktifkan', async () => {
+    await seedAdmin('Admin Halim', 'admin@wargahalim.id', 'AdminPass123!');
+
+    const regRes = await request(app).post('/api/auth/register').send({
+      name: 'Siti Rahma',
+      email: 'siti@wargahalim.id',
+      password: 'UserPass123!',
+    });
+    expect(regRes.status).toBe(201);
+    const newUserId = regRes.body.data.id as number;
+
+    // Login sebelum diaktifkan -> 403
+    const loginBefore = await request(app).post('/api/auth/login').send({
+      email: 'siti@wargahalim.id',
+      password: 'UserPass123!',
+    });
+    expect(loginBefore.status).toBe(403);
+
+    // Admin mengaktifkan user melalui PUT /api/admin/users/:id
+    const adminToken = await loginAs('admin@wargahalim.id', 'AdminPass123!');
+    const activateRes = await request(app)
+      .put(`/api/admin/users/${newUserId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ is_active: true });
+    expect(activateRes.status).toBe(200);
+    expect(activateRes.body.data.is_active).toBe(true);
+
+    // Login setelah diaktifkan -> 200 + token -> akses GET /api/auth/me -> 200
+    const loginAfter = await request(app).post('/api/auth/login').send({
+      email: 'siti@wargahalim.id',
+      password: 'UserPass123!',
+    });
+    expect(loginAfter.status).toBe(200);
+    expect(loginAfter.body.data.token).toBeDefined();
+
+    const meRes = await request(app)
+      .get('/api/auth/me')
+      .set('Authorization', `Bearer ${loginAfter.body.data.token as string}`);
+    expect(meRes.status).toBe(200);
+    expect(meRes.body.data.email).toBe('siti@wargahalim.id');
+  });
+
+  it('REG-07: Rate limiter registrasi membatasi percobaan ke-6 dalam 1 menit -> 429', async () => {
+    const testApp = express();
+    testApp.use(express.json());
+    const limiter = createRegisterRateLimiter({ max: 5, windowMs: 60000, skipInTest: false });
+    testApp.post('/register-test', limiter, (_req, res) => {
+      res.status(201).json({ ok: true });
+    });
+
+    for (let i = 0; i < 5; i++) {
+      const res = await request(testApp).post('/register-test');
+      expect(res.status).toBe(201);
+    }
+
+    const resBlocked = await request(testApp).post('/register-test');
+    expect(resBlocked.status).toBe(429);
   });
 });

@@ -13,17 +13,17 @@ Dokumen analisis dan rencana pengembangan ini disusun berdasarkan [PRD.md](file:
 | **F2** | Karyawan dan Biodata (`/karyawan`, `/karyawan/:id`) | User & Admin | Daftar kartu karyawan (foto atau avatar inisial, nama panggilan dan nama lengkap) + live search nama; halaman detail berisi foto/avatar, biodata lengkap, kenangan terkait, serta pesan yang diterima/dikirim. |
 | **F3** | Kenangan (`/kenangan`, `/kenangan/:id`) | User & Admin | Daftar kenangan bertanggal terbaru di atas (judul, tanggal, potongan cerita) dan detail cerita lengkap beserta daftar karyawan yang di-tag (klik nama mengarah ke `/karyawan/:id`). |
 | **F4** | Pesan dan Kesan (`/pesan`) | User & Admin | Menampilkan seluruh pesan antar karyawan (1 karyawan dapat memiliki banyak pesan) untuk dibaca user login. Hanya dapat ditambah dan dihapus oleh Admin melalui Panel Admin (tanpa fitur edit). |
-| **F5** | Login & Sesi User (`/login`) | Publik & Terproteksi | Login email & password untuk user & admin (tanpa halaman `/daftar` & tanpa halaman `/akun`). Token JWT disimpan di Zustand (`localStorage`). Header menampilkan nama user + tombol Keluar (plus Panel Admin untuk admin). |
-| **F6** | Panel Admin (`/admin/*`) | Admin | CRUD Karyawan (+ unggah/ganti/hapus foto JPG/PNG/WebP maks 2 MB ke Vercel Blob), CRUD Kenangan (+ tag karyawan), Kelola/Hapus Pesan, dan CRUD Akun User (termasuk aktif/nonaktifkan). |
+| **F5** | Registrasi, Login, & Sesi User (`/register`, `/login`) | Publik & Terproteksi | Registrasi akun user baru (`POST /api/auth/register`, status awal `is_active = false` menunggu aktivasi admin), login email & password untuk user & admin (tanpa `/daftar` dan tanpa `/akun`). Token JWT disimpan di Zustand (`localStorage`). Header menampilkan nama user + tombol Keluar (plus Panel Admin untuk admin). |
+| **F6** | Panel Admin (`/admin/*`) | Admin | CRUD Karyawan (+ unggah/ganti/hapus foto JPG/PNG/WebP maks 2 MB ke Vercel Blob), CRUD Kenangan (+ tag karyawan), Kelola/Hapus Pesan, dan CRUD Akun User (termasuk aktif/nonaktifkan pendaftar baru). |
 
-**Di luar scope (tidak dikerjakan):** registrasi mandiri, halaman `/akun`, edit pesan milik orang lain, tabel `company_profile`, upload foto oleh user, upload video, login OAuth/sosial media, lupa/ganti password oleh user, filter divisi/angkatan, dark mode, export PDF, dan dashboard statistik admin.
+**Di luar scope (tidak dikerjakan):** registrasi langsung aktif tanpa persetujuan admin, halaman `/akun`, edit pesan milik orang lain, tabel `company_profile`, upload foto oleh user, upload video, login OAuth/sosial media, lupa/ganti password oleh user, filter divisi/angkatan, dark mode, export PDF, dan dashboard statistik admin. *(Catatan: Deployment Vercel ditangguhkan terlebih dahulu).*
 
 ---
 
 ### 2. Identifikasi Role dan Permission
 | Peran | Autentikasi | Boleh Melihat | Boleh Mengubah / Mengelola | Ditolak |
 | --- | --- | --- | --- | --- |
-| **Pengunjung** | Tanpa login | Home (`/`, hanya galeri foto-foto via `GET /api/photos`), Login (`/login`), Not Found (`*`) | Tidak ada | Daftar karyawan, biodata karyawan (diri maupun orang lain), kenangan, pesan & kesan, dan Panel Admin (otomatis diarahkan ke `/login`). |
+| **Pengunjung** | Tanpa login | Home (`/`, hanya galeri foto-foto via `GET /api/photos`), Login (`/login`), Registrasi (`/register`), Not Found (`*`) | Mengajukan pendaftaran akun (`POST /api/auth/register` -> status awal `is_active = 0`) | Daftar karyawan, biodata karyawan (diri maupun orang lain), kenangan, pesan & kesan, dan Panel Admin (otomatis diarahkan ke `/login`). |
 | **User** | Login JWT (`role = 'user'`, `is_active = 1`) | Semua halaman & data berstatus `published`: Home, `/karyawan`, `/karyawan/:id`, `/kenangan`, `/kenangan/:id`, `/pesan` | Tidak ada (hanya membaca seluruh data terbit) | Panel Admin (`/admin/*`), data berstatus `draft`, serta menambah, mengubah, atau menghapus data apa pun. |
 | **Admin** | Login JWT (`role = 'admin'`, `is_active = 1`) | Semua data (termasuk `draft` & `published`) serta seluruh modul Panel Admin | Mengelola karyawan, foto karyawan, kenangan + tag, akun user (tambah/ubah/nonaktif/hapus), serta tambah & hapus pesan | Dicegah menonaktifkan atau menghapus akun admin miliknya sendiri. |
 
@@ -61,7 +61,7 @@ Database menggunakan MySQL (`utf8mb4`) dengan library `mysql2` (connection pool 
 ---
 
 ### 5. Identifikasi Seluruh API Endpoint
-- **Publik:** `GET /api/photos` (hanya URL foto karyawan `published` tanpa biodata), `POST /api/auth/login`.
+- **Publik:** `GET /api/photos` (hanya URL foto karyawan `published` tanpa biodata), `POST /api/auth/register` (daftar user baru status nonaktif), `POST /api/auth/login`.
 - **User atau Admin (wajib JWT & `is_active = 1`):** `GET /api/auth/me`, `GET /api/employees?search=`, `GET /api/employees/:id`, `GET /api/memories`, `GET /api/memories/:id`, `GET /api/messages`.
 - **Admin (`role === 'admin'`):**
   - `GET, POST, PUT, DELETE /api/admin/employees` (+ `/:id`)
@@ -76,8 +76,8 @@ Database menggunakan MySQL (`utf8mb4`) dengan library `mysql2` (connection pool 
 
 ### 6. Identifikasi Kebutuhan Keamanan
 - **Autentikasi & Otorisasi:** Password di-hash `bcryptjs`; token JWT berumur `1d`; middleware memeriksa token, `role`, dan `is_active` pada setiap endpoint terproteksi; admin dicegah menghapus/menonaktifkan dirinya sendiri.
-- **Proteksi Data Publik:** Pengunjung tanpa token hanya mengakses `POST /api/auth/login` dan `GET /api/photos` (tanpa membocorkan nama ataupun biodata); endpoint data hanya mengembalikan konten `published` untuk `user`.
-- **Anti-Brute Force & HTTP Security:** `express-rate-limit` (5 percobaan/menit di `POST /api/auth/login`), `cors` dibatasi ke `CLIENT_URL`, dan `helmet`.
+- **Proteksi Data Publik:** Pengunjung tanpa token hanya mengakses `POST /api/auth/register`, `POST /api/auth/login`, dan `GET /api/photos` (tanpa membocorkan nama ataupun biodata); endpoint data hanya mengembalikan konten `published` untuk `user`.
+- **Anti-Brute Force & HTTP Security:** `express-rate-limit` (5 percobaan/menit di `POST /api/auth/login` dan `POST /api/auth/register`), `cors` dibatasi ke `CLIENT_URL`, dan `helmet`.
 - **Validasi & Anti-Injection:** Validasi dua lapis (React Hook Form + Zod di client, Zod di server), seluruh SQL query memakai placeholder `?` (`mysql2`), serta validasi tipe (JPG/PNG/WebP) dan ukuran (<= 2 MB) unggahan foto di client dan server.
 - **Manajemen Kredensial & TypeScript:** `.env` dikecualikan dari Git (sediakan `.env.example`), password seed admin wajib diganti sebelum produksi (plus skrip CLI reset password admin), dan TypeScript `strict: true` tanpa tipe `any`.
 
@@ -293,14 +293,14 @@ flowchart TD
   - Password di-crypt (hash) menggunakan `bcryptjs` (salt rounds: 10).
   - Percobaan login ke-6 dalam 1 menit ditolak dengan HTTP `429` dan pesan bahasa Indonesia.
 
-#### `T-07` — Endpoint `POST /api/auth/login`, `GET /api/auth/me`, Service Layer, & Middleware Pelindung
-- **Deskripsi:** Memisahkan layer `services/auth.service.ts` dan `controllers/auth.controller.ts` untuk endpoint login dan cek sesi `/auth/me` (menyertakan `employee_id`/`employeeId` & `is_active`/`isActive`), membuat `types/express.d.ts` (request augmentation), `middleware/authenticate.ts` (verifikasi JWT + cek `is_active` & role terbaru dari DB), serta `middleware/authorize.ts` (reusable role checker termasuk `authorizeAdmin`).
+#### `T-07` — Endpoint `POST /api/auth/register`, `POST /api/auth/login`, `GET /api/auth/me`, Service Layer, & Middleware Pelindung
+- **Deskripsi:** Memisahkan layer `services/auth.service.ts` dan `controllers/auth.controller.ts` untuk endpoint registrasi (`is_active = false`, `role = 'user'`, `employee_id = NULL`, hash `bcryptjs`), login, dan cek sesi `/auth/me` (menyertakan `employee_id`/`employeeId` & `is_active`/`isActive`), membuat `types/express.d.ts` (request augmentation), `middleware/authenticate.ts` (verifikasi JWT + cek `is_active` & role terbaru dari DB), serta `middleware/authorize.ts` (reusable role checker termasuk `authorizeAdmin`).
 - **Dependency:** `T-04`, `T-06`
 - **Acceptance Criteria:**
+  - `POST /api/auth/register` memvalidasi `name` (min 5), `email` (min 5, format valid, unik -> `409`), `password` (min 6), menyimpan `is_active = 0`, `role = 'user'`, `employee_id = NULL`, dan membalas `201` tanpa token JWT maupun `password_hash`.
   - Login berhasil mengembalikan JWT dan data user (tanpa `password_hash`, menyertakan `employee_id`/`employeeId` & `is_active`/`isActive`); akun `is_active = 0` ditolak (`403`); email tidak terdaftar atau password salah ditolak (`401`) dengan pesan seragam `"Email atau password salah"` tanpa membocorkan mana yang salah.
   - Endpoint tanpa token atau token kedaluwarsa ditolak `401`.
   - `authorize('admin')` / `authorizeAdmin` menolak token ber-role `user` dengan `403`.
-  - Tidak ada endpoint `/api/auth/register`.
 
 ---
 
@@ -423,11 +423,12 @@ flowchart TD
   - Memiliki kondisi loading skeleton, kosong, dan error + tombol coba lagi.
   - Responsif di `360px` dan desktop.
 
-#### `T-22` — Halaman Login (`/login`)
-- **Deskripsi:** Mengimplementasikan form login email & password menggunakan React Hook Form + Zod (`zodResolver`), pesan error bahasa Indonesia di bawah kolom, tombol Masuk nonaktif saat loading, dan toast.
+#### `T-22` — Halaman Login (`/login`) & Registrasi (`/register`)
+- **Deskripsi:** Mengimplementasikan form login email & password serta halaman registrasi publik (`/register`: `name`, `email`, `password`, `confirmPassword`) menggunakan React Hook Form + Zod (`zodResolver`), pesan error bahasa Indonesia di bawah kolom, tombol aksi nonaktif saat loading, dan toast.
 - **Dependency:** `T-07`, `T-19`, `T-20`
 - **Acceptance Criteria:**
   - Validasi Zod berjalan sebelum submit dan menampilkan pesan tepat di bawah kolom.
+  - Registrasi di `/register` memanggil `POST /api/auth/register`, menampilkan info bahwa akun menunggu persetujuan/aktivasi Admin (tidak langsung login), dan menautkan ke `/login`.
   - Login berhasil menyimpan sesi di Zustand, menampilkan toast sukses, dan mengarahkan admin ke `/admin` atau user ke `/karyawan` (atau halaman tujuan sebelumnya).
   - Login gagal menampilkan toast error dan tidak mengosongkan input email.
 
@@ -517,8 +518,8 @@ flowchart TD
   - Seluruh metrik peluncuran terpenuhi dan seluruh test case di [TEST_PLAN.md](file:///c:/Users/dimas/Desktop/Belajar/github/4-kampung-halim/docs/TEST_PLAN.md) lulus.
   - Password admin bukan lagi password seed dan `.env` tidak ada di Git.
 
-#### `T-33` — Provisioning Produksi & Deployment ke Vercel
-- **Deskripsi:** Menyiapkan database MySQL eksternal & Vercel Blob produksi, deploy `server` dan `client` sebagai 2 project di Vercel, mengatur seluruh environment variable, lalu uji smoke test dari HP & cek Lighthouse (`< 3 detik`).
+#### `T-33` — Provisioning Produksi & Deployment ke Vercel *(Ditangguhkan Terlebih Dahulu)*
+- **Deskripsi:** *(Diabaikan sementara sesuai instruksi fokus pengembangan lokal)*. Menyiapkan database MySQL eksternal & Vercel Blob produksi serta deploy `server` dan `client` ke Vercel pada fase deployment terpisah nanti.
 - **Dependency:** `T-32`
 - **Acceptance Criteria:**
   - Website dapat dibuka melalui satu link publik Vercel di HP dan desktop tanpa error.
