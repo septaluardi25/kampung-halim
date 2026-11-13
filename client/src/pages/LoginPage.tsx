@@ -3,7 +3,7 @@ import { useMutation } from '@tanstack/react-query';
 import { LogIn } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
-import { Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { ApiError, apiRequest } from '../lib/api';
 import { type LoginFormValues, loginSchema } from '../schemas/auth.schema';
 import { useAuthStore } from '../stores/authStore';
@@ -132,6 +132,16 @@ export function LoginPage() {
             {loginMutation.isPending ? 'Memproses...' : 'Masuk'}
           </button>
         </form>
+
+        <p className="mt-6 text-center text-base text-slate-600">
+          Belum punya akun?{' '}
+          <Link
+            to="/register"
+            className="font-semibold text-sky-700 hover:underline"
+          >
+            Daftar di sini
+          </Link>
+        </p>
       </div>
     </div>
   );

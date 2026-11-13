@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { AppRoutes } from '../App';
 import { useAuthStore } from '../stores/authStore';
 
@@ -61,6 +61,31 @@ describe('Route Guards (ProtectedRoute & AdminRoute)', () => {
 
     renderAtRoute('/admin');
     expect(screen.getByText('Panel Admin Warga Halim')).toBeInTheDocument();
+  });
+
+  it('FE-GUARD-03a: pengunjung belum login dapat mengakses halaman /register', () => {
+    renderAtRoute('/register');
+    expect(screen.getByText('Daftar Akun Warga Halim')).toBeInTheDocument();
+  });
+
+  it('FE-GUARD-03b: user yang sudah login mengakses /register diarahkan ke /karyawan', () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({ success: true, data: [], message: 'OK' }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
+    );
+
+    useAuthStore.getState().setAuth('user-token', {
+      id: 2,
+      name: 'User Biasa',
+      email: 'user@wargahalim.id',
+      role: 'user',
+      employee_id: 1,
+    });
+
+    renderAtRoute('/register');
+    expect(screen.getByText('Daftar Karyawan')).toBeInTheDocument();
   });
 
   it('Rute tidak dikenal (*) atau /daftar menampilkan halaman 404 Bahasa Indonesia', () => {
