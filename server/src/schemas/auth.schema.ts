@@ -34,8 +34,6 @@ export const createUserSchema = z.object({
     .string()
     .min(6, 'Password minimal 6 karakter'),
   is_active: z.boolean().default(true),
-  role: z.string().optional(),
-  employee_id: z.any().optional(),
 });
 
 export type CreateUserInput = z.infer<typeof createUserSchema>;
@@ -57,7 +55,7 @@ export const updateUserSchema = z.object({
     .min(6, 'Password minimal 6 karakter')
     .optional(),
   is_active: z.boolean().optional(),
-  role: z.string().optional(),
+  role: z.enum(['admin', 'user']).optional(),
   employee_id: z.coerce
     .number({ message: 'ID karyawan harus berupa angka' })
     .int('ID karyawan harus berupa bilangan bulat')

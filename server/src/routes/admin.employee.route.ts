@@ -8,13 +8,9 @@ import {
   updateAdminEmployeeHandler,
   uploadEmployeePhotoHandler,
 } from '../controllers/admin.employee.controller';
-import { authenticate } from '../middleware/authenticate';
-import { authorizeAdmin } from '../middleware/authorize';
 import { uploadEmployeePhotoMiddleware } from '../middleware/upload.middleware';
 
 export const adminEmployeeRouter = Router();
-
-adminEmployeeRouter.use(authenticate, authorizeAdmin);
 
 adminEmployeeRouter.get('/', listAdminEmployeesHandler);
 adminEmployeeRouter.get('/:id', getAdminEmployeeByIdHandler);

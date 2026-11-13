@@ -15,7 +15,7 @@ import {
   updateEmployeePhoto,
 } from '../services/admin.employee.service';
 import { validateImageBuffer } from '../utils/blob';
-import { AdminServiceError } from '../utils/errors';
+import { handleServiceError } from '../utils/handleServiceError';
 import { sendError, sendSuccess } from '../utils/response';
 
 export async function listAdminEmployeesHandler(
@@ -33,11 +33,7 @@ export async function listAdminEmployeesHandler(
     const employees = await listAdminEmployees(parsedQuery.data.search);
     sendSuccess(res, 200, employees, 'Daftar karyawan berhasil diambil');
   } catch (error) {
-    if (error instanceof AdminServiceError) {
-      sendError(res, error.statusCode, error.message);
-      return;
-    }
-    next(error);
+    handleServiceError(error, res, next);
   }
 }
 
@@ -56,11 +52,7 @@ export async function getAdminEmployeeByIdHandler(
     const employee = await getAdminEmployeeById(parsedParams.data.id);
     sendSuccess(res, 200, employee, 'Detail karyawan berhasil diambil');
   } catch (error) {
-    if (error instanceof AdminServiceError) {
-      sendError(res, error.statusCode, error.message);
-      return;
-    }
-    next(error);
+    handleServiceError(error, res, next);
   }
 }
 
@@ -79,11 +71,7 @@ export async function createAdminEmployeeHandler(
     const employee = await createAdminEmployee(parsedBody.data);
     sendSuccess(res, 201, employee, 'Karyawan berhasil ditambahkan');
   } catch (error) {
-    if (error instanceof AdminServiceError) {
-      sendError(res, error.statusCode, error.message);
-      return;
-    }
-    next(error);
+    handleServiceError(error, res, next);
   }
 }
 
@@ -108,11 +96,7 @@ export async function updateAdminEmployeeHandler(
     const employee = await updateAdminEmployee(parsedParams.data.id, parsedBody.data);
     sendSuccess(res, 200, employee, 'Karyawan berhasil diperbarui');
   } catch (error) {
-    if (error instanceof AdminServiceError) {
-      sendError(res, error.statusCode, error.message);
-      return;
-    }
-    next(error);
+    handleServiceError(error, res, next);
   }
 }
 
@@ -131,11 +115,7 @@ export async function deleteAdminEmployeeHandler(
     const result = await deleteAdminEmployee(parsedParams.data.id);
     sendSuccess(res, 200, result, 'Karyawan berhasil dihapus');
   } catch (error) {
-    if (error instanceof AdminServiceError) {
-      sendError(res, error.statusCode, error.message);
-      return;
-    }
-    next(error);
+    handleServiceError(error, res, next);
   }
 }
 
@@ -175,11 +155,7 @@ export async function uploadEmployeePhotoHandler(
 
     sendSuccess(res, 200, { photo_url: photoUrl }, 'Foto karyawan berhasil diperbarui');
   } catch (error) {
-    if (error instanceof AdminServiceError) {
-      sendError(res, error.statusCode, error.message);
-      return;
-    }
-    next(error);
+    handleServiceError(error, res, next);
   }
 }
 
@@ -198,10 +174,6 @@ export async function deleteEmployeePhotoHandler(
     await deleteEmployeePhoto(parsedParams.data.id);
     sendSuccess(res, 200, { photo_url: null }, 'Foto karyawan berhasil dihapus');
   } catch (error) {
-    if (error instanceof AdminServiceError) {
-      sendError(res, error.statusCode, error.message);
-      return;
-    }
-    next(error);
+    handleServiceError(error, res, next);
   }
 }

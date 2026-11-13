@@ -15,7 +15,14 @@ export const adminMemoryBodySchema = z.object({
     .max(200, 'Judul kenangan maksimal 200 karakter'),
   event_date: z
     .string({ message: 'Tanggal kejadian wajib diisi' })
-    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Format tanggal harus YYYY-MM-DD'),
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Format tanggal harus YYYY-MM-DD')
+    .refine(
+      (val) => {
+        const d = new Date(val + 'T00:00:00Z');
+        return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === val;
+      },
+      { message: 'Tanggal tidak valid' }
+    ),
   story: z
     .string({ message: 'Cerita kenangan wajib diisi' })
     .trim()
