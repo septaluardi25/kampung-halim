@@ -1,175 +1,681 @@
-# ISSUE #06 — Code Review & Hardening Backend Warga Halim
+# ISSUE #07 — Tahap 5: Fondasi Frontend, Zustand, Halaman Publik/User, Route Guards, & API Prerequisite (`GET /api/photos`, `GET /api/employees/:id`)
 
-- **Proyek:** Warga Halim (`server/`, Express + TypeScript + MySQL2 + Zod)
-- **Target Pembaca:** Junior Developer & AI Coding Model (hemat biaya) — ikuti langkah APA ADANYA, jangan berimprovisasi.
-- **Status:** `Open`
-- **Hasil Review:** Backend (Public API, Auth, Admin API) sudah berjalan dan 20 skenario admin lulus, namun ditemukan **12 temuan** (3 High, 5 Medium, 4 Low) yang harus diperbaiki + **belum ada automated test di repository**.
-- **Dokumen Wajib Dibaca Dulu:** `docs/PRD.md` (sumber requirement utama), `docs/API_DOCUMENTATION.md`, `docs/DATABASE_DESIGN.md`, `docs/DEVELOPMENT_PLAN.md`, `docs/TEST_PLAN.md`.
+> **Ditujukan untuk:** Junior Fullstack Developer & AI Coding Model  
+> **Sumber Requirement Utama:** `docs/PRD.md`  
+> **Referensi Pendukung:** `docs/DEVELOPMENT_PLAN.md`, `docs/DATABASE_DESIGN.md`, `docs/API_DOCUMENTATION.md`, `docs/TEST_PLAN.md`
 
 ---
 
-## 0. Keputusan Konflik Aturan (SUDAH DIJAWAB USER — jangan ditanyakan ulang)
+## 0. Audit Dokumentasi & Peringatan Penting Sebelum Mulai
 
-| Konflik | Sumber A | Sumber B | **Keputusan** |
-|---|---|---|---|
-| Registrasi publik | Task 3 lama: `POST /api/auth/register` | PRD §F-auth & `TEST_PLAN TC-AUTH-09`: **tidak ada** register, akun dibuat admin | **Ikuti PRD. JANGAN buat endpoint register.** Docs tidak diubah. |
-| Panjang password | Task 3 lama: min 8 | PRD & docs: min **6** | **Min 6** (tidak diubah). |
-| Rate limit | Task 3 lama: login + register | PRD: hanya login (5/menit) | Hanya login. |
+Sebelum menulis satu baris kode pun, **wajib membaca dan memahami aturan berikut**:
 
-> Jika menemukan konflik BARU antara kode dan docs: **berhenti, tanya user**, lalu perbaiki docs. Jangan menebak.
-
----
-
-## 1. Temuan Review (urut prioritas)
-
-### HIGH
-| ID | File | Masalah | Perbaikan |
-|---|---|---|---|
-| H1 | `server/src/schemas/auth.schema.ts` | `createUserSchema` memakai `employee_id: z.any()` dan menerima `role` → melanggar aturan **dilarang `any`** & mengundang mass-assignment. | Hapus `role` & `employee_id` dari `createUserSchema`. Zod `z.object` otomatis membuang key tak dikenal. Di `updateUserSchema` ubah `role: z.string().optional()` menjadi `z.enum(['admin','user']).optional()` (tetap ditolak 400 oleh service bila beda dari role saat ini). |
-| H2 | `server/src/app.ts` | Tidak ada `app.set('trust proxy', 1)`. Di Vercel semua request tampak satu IP → rate limiter login memblokir semua orang (atau mudah dibypass lewat header). | Tambah `app.set('trust proxy', 1)` hanya saat `env.NODE_ENV === 'production'`. |
-| H3 | `server/src/middleware/error.middleware.ts` | JSON body rusak (`{bad`) dan body > 1 MB menghasilkan **500**, seharusnya **400/413**. Error `ER_DUP_ENTRY` (race `employee_id`/email unik) juga jadi 500. | Di `globalErrorHandler`: jika `err` punya `type === 'entity.parse.failed'` → 400 `Format JSON tidak valid`; `entity.too.large` → 413; jika `code === 'ER_DUP_ENTRY'` → 409 `Data sudah digunakan`. Jangan bocorkan pesan SQL. |
-
-### MEDIUM
-| ID | File | Masalah | Perbaikan |
-|---|---|---|---|
-| M1 | `middleware/authenticate.ts` | `jwt.verify` tanpa pembatasan algoritma. | `jwt.verify(token, env.JWT_SECRET, { algorithms: ['HS256'] })` dan pastikan `jwt.sign` di `auth.service.ts` memakai `algorithm: 'HS256'`. |
-| M2 | `schemas/admin.memory.schema.ts` | `event_date` hanya regex → `2022-13-45` lolos ke DB (error 500). | Tambah `.refine` yang memvalidasi tanggal nyata: `const d = new Date(v + 'T00:00:00Z'); !isNaN(d.getTime()) && d.toISOString().slice(0,10) === v`. Pesan: `Tanggal tidak valid`. |
-| M3 | `services/admin.employee.service.ts` → `deleteAdminEmployee` | Foto Blob dihapus **sebelum** `DELETE` di DB; jika DB gagal foto hilang tapi data masih ada. | Urutan baru: `DELETE` DB dulu → baru `deletePhotoFromBlob` (best-effort, error hanya di-log). |
-| M4 | `services/admin.employee.service.ts` → `deleteEmployeePhoto` | Sama seperti M3 (hapus blob dulu lalu set NULL). | `UPDATE photo_url = NULL` dulu → baru hapus blob. |
-| M5 | **Repository** | Tidak ada automated test; test-runner dulu dihapus setelah dijalankan → regresi tidak terdeteksi. | Lihat §3 (Vitest + Supertest, wajib masuk Git). |
-
-### LOW
-| ID | File | Masalah | Perbaikan |
-|---|---|---|---|
-| L1 | `db/seed.sql` | Hash bcrypt di seed berupa placeholder (tidak valid) → seed admin tidak bisa login. | Buat `server/src/db/seed-admin.ts` (script `npm run seed:admin`) yang membaca `ADMIN_EMAIL` & `ADMIN_PASSWORD` dari `.env`, hash dengan `hashPassword`, `INSERT ... ON DUPLICATE KEY UPDATE`. Tambahkan dua variabel itu ke `.env.example` (nilai kosong). Hapus hash palsu dari `seed.sql` (user contoh dibuat via script/admin). |
-| L2 | `controllers/admin.*.controller.ts` | Blok `try/catch` + `instanceof AdminServiceError` diulang di ±20 handler. | Buat helper `utils/handleServiceError.ts`: `(error, res, next)`; pakai di semua controller. Perilaku HTTP tidak boleh berubah. |
-| L3 | `routes/admin.*.route.ts` | `authenticate, authorizeAdmin` dipasang di tiap router. | Pasang sekali di `routes/index.ts`: `router.use('/admin', authenticate, authorizeAdmin)` lalu hapus `router.use(...)` di 4 file route admin. |
-| L4 | `middleware/auth.middleware.ts` | File re-export lama (3 baris) membingungkan; dua nama `authenticate`. | Ubah import di `routes/employee.route.ts`, `memory.route.ts`, `message.route.ts` ke `../middleware/authenticate`, lalu hapus file lama. |
+1. **Keselarasan Dokumentasi (`PRD.md` adalah Sumber Kebenaran Utama):**
+   - Hasil audit antara `docs/PRD.md` dan `docs/API_DOCUMENTATION.md` menemukan bahwa `PRD.md` (Fitur `F2`) mewajibkan kartu `/karyawan` menampilkan **nama panggilan (`nickname`) dan nama lengkap (`full_name`)**. Bagian `3.2 GET /api/employees` pada `docs/API_DOCUMENTATION.md` telah diperbarui agar mencantumkan field `"nickname"` dan pencarian `full_name` / `nickname` sehingga 100% selaras dengan `PRD.md` dan `server/src/controllers/employee.controller.ts`.
+   - Dokumen lainnya (`docs/DEVELOPMENT_PLAN.md`, `docs/DATABASE_DESIGN.md`, `docs/TEST_PLAN.md`) sudah selaras dengan `PRD.md`.
+   - Jika suatu saat menemukan ketidaksesuaian baru di dokumentasi, **`docs/PRD.md` selalu menang** — ikuti `PRD.md` lalu perbarui file `docs/` yang bertentangan.
+2. **Temuan Penting pada Backend (`server/`) saat ini:**
+   - Endpoint `GET /api/photos` (untuk Halaman Home publik) dan `GET /api/employees/:id` (untuk Halaman Detail Biodata Karyawan) **belum diimplementasikan** di `server/src/routes/`.
+   - Oleh karena itu, Issue ini dikerjakan berurutan: **Tahap 5A (Menyelesaikan 2 Endpoint Backend Prerequisite + Test)** dilanjutkan **Tahap 5B–5D (Membangun Aplikasi Frontend `client/` + Test)**.
+3. **Larangan Keras (Hard Constraints):**
+   - **DILARANG** menggunakan `React Context` (`createContext`, `useContext`) atau `useReducer` untuk manajemen state auth/aplikasi. Wajib menggunakan **Zustand** (`client/src/stores/authStore.ts`).
+   - **DILARANG** menggunakan tipe `any` di TypeScript (`strict: true` wajib aktif di `tsconfig`).
+   - **DILARANG** meng-upload file `.env`, password, token Vercel Blob, atau kredensial apa pun ke Git. Selalu gunakan `.env.example` sebagai template dan pastikan `.env` masuk `.gitignore`.
+   - **DILARANG** membuat halaman `/daftar`, `/register`, atau `/akun` (`PRD` mengunci sistem hanya menggunakan akun buatan Admin).
+   - **DILARANG** menampilkan tombol tulis, edit, atau hapus pesan pada halaman user (`/pesan` dan `/karyawan/:id`). Fitur user 100% **read-only**.
+   - **DILARANG** membocorkan nama, biodata, atau foto karyawan berstatus `draft` ke endpoint publik `GET /api/photos` maupun ke user biasa.
+   - **JANGAN** mengimplementasikan modul CRUD Admin UI secara penuh di tahap ini (`/admin/*` cukup dibuatkan route guard + halaman shell/placeholder *"Panel Admin — Akan Diimplementasikan pada Tahap 6"*).
 
 ---
 
-## 2. Aturan Emas (WAJIB)
-1. Dilarang `any`, dilarang `// @ts-ignore`. TypeScript `strict` tetap aktif.
-2. Lapisan: `routes → controllers → services → schemas`. Controller tanpa SQL; service tanpa `req/res`.
-3. Semua SQL parameterized (`?`). Response selalu `{ success, data, message }`.
-4. **Jangan** mengubah kontrak response/endpoint yang sudah ada kecuali tertulis di atas.
-5. **Jangan** commit `.env`, token, atau file `prompt.txt`. Cek `git status` sebelum `git add`. Gunakan `git add <file>` eksplisit, bukan `git add .` tanpa melihat statusnya.
-6. Kerjakan **satu temuan per commit** (pesan: `fix(<scope>): <ID> <ringkas>`), branch `fix/code-review-hardening` dari `main`.
-7. Setelah tiap temuan jalankan: `npm --prefix server run typecheck` lalu tes terkait.
+## 1. Tujuan & Ringkasan Pekerjaan
+
+Menyelesaikan integrasi akhir API publik/user dan membangun aplikasi frontend **Warga Halim** di folder `client/` dengan stack:
+
+- **React 19** + **Vite** + **TypeScript (`strict: true`)**
+- **React Router** (`react-router-dom`)
+- **Zustand** (`authStore`)
+- **TanStack Query** (`@tanstack/react-query`)
+- **React Hook Form** + **Zod** (`@hookform/resolvers/zod`)
+- **react-hot-toast** (notifikasi bahasa Indonesia)
+- **Tailwind CSS** + **Lucide React** (ikon)
+
+### Palet Warna & Tipografi Resmi (`docs/PRD.md` & `docs/TEST_PLAN.md`)
+- **Sky Blue (`#8ECDF2`)** — aksen lembut, badge, latar header/kartu sekunder.
+- **White (`#FFFFFF`)** — latar utama yang bersih dan lega.
+- **Scarlet (`#E32636`)** — **hanya** untuk aksen tombol aksi utama (*CTA*, tombol Masuk/Keluar penting), **jangan** mendominasi seluruh layar.
+- **Tipografi:** Font **Serif** untuk judul (`h1`, `h2`, `h3`, brand logo), dan **Sans-serif** ukuran minimal **`16px`** (`text-base`) untuk teks isi agar nyaman dibaca.
+- **Responsivitas Wajib:** Teruji rapi pada lebar layar **`360px`** (HP 1 kolom), tablet (2 kolom), dan desktop (`>= 1280px`, 3 kolom) tanpa horizontal scroll/overflow.
 
 ---
 
-## 3. Setup Automated Test (Temuan M5)
+## 2. Struktur Folder Profesional (Small-to-Medium App)
 
-1. Install (butuh network): `npm --prefix server install -D vitest supertest @types/supertest`.
-2. Tambah script `server/package.json`: `"test": "vitest run --no-file-parallelism"`.
-3. Buat `server/vitest.config.ts` (environment `node`, `setupFiles: ['tests/setup.ts']`, `testTimeout: 20000`).
-4. Test memakai database **terpisah**: buat DB `warga_halim_test` dan isi `server/.env.test` (sudah ter-ignore oleh `.env.*`). Jangan pernah menjalankan test ke DB utama.
-5. `server/tests/setup.ts` wajib: set `process.env.NODE_ENV='test'`, dan menyediakan helper `resetDb()` (urutan: `messages`, `memory_employees`, `memories`, `users`, `employees`), `seedAdmin()`, `seedUser()`, `seedEmployee()`, `loginAs()`.
-6. **Aturan konsistensi:** panggil `await resetDb()` di `beforeEach` pada SETIAP file test.
-7. Struktur: `server/tests/{health,employees,memories,messages,auth,admin.employees,admin.memories,admin.messages,admin.users,admin.photo,hardening}.test.ts`. Gunakan `request(app)` dari `src/app.ts` (tidak perlu listen port).
-8. Setiap test menulis contoh request & response ke ringkasan (gunakan `console.info(JSON.stringify({ req, res }, null, 2))` di test inti) agar bisa disalin ke laporan.
+### 2.1 Penambahan pada `server/` (Tahap 5A)
 
----
+```text
+server/
+├── src/
+│   ├── controllers/
+│   │   ├── employee.controller.ts   <-- [UPDATE] tambah getEmployeeById
+│   │   └── photo.controller.ts      <-- [BARU] getPublicPhotos
+│   ├── routes/
+│   │   ├── employee.route.ts        <-- [UPDATE] tambah GET /employees/:id
+│   │   ├── photo.route.ts           <-- [BARU] tambah GET /photos (tanpa authenticate)
+│   │   └── index.ts                 <-- [UPDATE] daftarkan photoRoutes
+│   └── schemas/
+│       └── employee.schema.ts       <-- [UPDATE] tambah employeeIdParamSchema
+└── tests/
+    └── public.test.ts               <-- [UPDATE] tambah skenario PUB-01 (photos) & PUB-02B (employee detail)
+```
 
-## 4. Skenario Test Lengkap per API
+### 2.2 Struktur Lengkap `client/` (Tahap 5B–5D)
 
-> Format: **ID — skenario → status yang diharapkan**. Semua diawali `resetDb()`.
-
-### 4.1 Public (butuh token user/admin)
-- `PUB-01` GET `/api/health` → 200.
-- `PUB-02` GET `/api/employees` tanpa token → 401; token valid → 200 hanya `published`, urut nama.
-- `PUB-03` `?search=` cocok nama/nickname → hasil terfilter; `?search=` > 100 karakter → 400; tak cocok → 200 `[]`.
-- `PUB-04` GET `/api/memories` hanya `published`, urut `event_date DESC`.
-- `PUB-05` GET `/api/memories/:id` published → 200 + `employees` hanya yang published; draft → 404; `abc`/`0`/`-1` → 400; id tak ada → 404.
-- `PUB-06` GET `/api/messages` hanya jika pengirim & penerima `published`; tanpa token → 401.
-- `PUB-07` `POST/PUT/PATCH/DELETE /api/messages` → 404 (tidak ada endpoint tulis user).
-- `PUB-08` Rute tak dikenal → 404 `Endpoint tidak ditemukan`.
-
-### 4.2 Auth
-- `AUTH-01` login benar (admin & user) → 200 `token,id,name,email,role,employeeId`; tanpa `password_hash`.
-- `AUTH-02` password salah & email tak terdaftar → 401 dengan **pesan identik**.
-- `AUTH-03` akun nonaktif → 403.
-- `AUTH-04` validasi: email format salah / <5, password <6 / kosong / body kosong → 400.
-- `AUTH-05` percobaan ke-6 dalam 1 menit → 429 (buat limiter baru dengan `skipInTest:false` di test khusus).
-- `AUTH-06` `GET /auth/me` tanpa token → 401; token valid → 200 + `employeeId,isActive`; token acak → 401; token kedaluwarsa (sign `expiresIn:'-1s'`) → 401.
-- `AUTH-07` user dinonaktifkan setelah dapat token → request berikutnya 403.
-- `AUTH-08` role diubah di DB setelah token terbit → middleware memakai role terbaru.
-- `AUTH-09` `POST /api/auth/register` → **404** (sesuai PRD).
-- `AUTH-10` token dengan `alg: none` / secret salah → 401 (M1).
-
-### 4.3 Admin Employees (`/api/admin/employees`)
-- `ADE-01` POST valid → 201; `hobby:""` → `null`; nickname kosong → kata pertama nama.
-- `ADE-02` POST `full_name` kosong/hilang / >150 → 400; `status:"x"` → 400.
-- `ADE-03` GET list memuat draft+published; `?search=` bekerja; kosong → `[]`.
-- `ADE-04` GET `:id` ada → 200; tak ada → 404; `abc` → 400.
-- `ADE-05` PUT valid (draft→published) → 200 & muncul di `/api/employees`; id tak ada → 404; body invalid → 400.
-- `ADE-06` DELETE → 200; pesan & tag ikut terhapus, memory utuh, user tertaut `employee_id=NULL`; id tak ada → 404.
-- `ADE-07` tanpa token → 401; token user → 403 (setiap method).
-
-### 4.4 Admin Memories
-- `ADM-01` POST + `employee_ids:[1,2]` → 201, tag tersimpan.
-- `ADM-02` `employee_ids` berisi id tak ada → 400 & **0 baris** baru di `memories` dan `memory_employees` (rollback).
-- `ADM-03` `employee_ids` duplikat `[1,1]` → disimpan 1 kali.
-- `ADM-04` judul kosong, story kosong, tanggal `2022-13-45`/`22-1-1` → 400 (M2).
-- `ADM-05` PUT mengganti tag `[1]→[2]` atomik; PUT dengan id tak valid → 400 dan tag lama **tidak berubah**; id memory tak ada → 404.
-- `ADM-06` DELETE → 200, tag terhapus, employee utuh; tak ada → 404.
-- `ADM-07` GET list/detail memuat draft; `employees` terisi; 404 bila tak ada.
-- `ADM-08` 401 tanpa token, 403 untuk user.
-
-### 4.5 Admin Messages
-- `ADG-01` POST valid → 201, `impression` opsional (`""`→`null`), muncul di `/api/messages` jika keduanya published.
-- `ADG-02` sender == recipient → 400; sender/recipient tak ada → 400; message kosong → 400; impression >300 → 400.
-- `ADG-03` GET list termasuk karyawan draft.
-- `ADG-04` DELETE → 200; tak ada → 404.
-- `ADG-05` `PUT`/`PATCH /api/admin/messages/:id` → 404.
-- `ADG-06` 401 / 403.
-
-### 4.6 Admin Users
-- `ADU-01` POST valid → 201, `role:"user"` walau body kirim `role:"admin"`, `employee_id:null` walau body kirim angka, hash di DB diawali `$2`, tak ada `password_hash` di response, bisa login (H1).
-- `ADU-02` email duplikat (beda huruf besar/kecil) → 409; name <5, email invalid, password <6 → 400.
-- `ADU-03` PUT tautkan `employee_id` → 200; karyawan tak ada → 400; sudah dipakai user lain → 409; `null` melepas tautan.
-- `ADU-04` PUT ganti email ke milik user lain → 409; ganti password → login password lama gagal, baru berhasil.
-- `ADU-05` PUT `is_active:false` → user tak bisa login (403) & token lamanya ditolak; admin menonaktifkan diri sendiri → 400.
-- `ADU-06` PUT `role` berbeda dari role saat ini → 400; `role:"superadmin"` → 400 (H1); user tak ada → 404.
-- `ADU-07` DELETE user lain → 200; diri sendiri → 400; tak ada → 404.
-- `ADU-08` GET list tidak memuat `password_hash`; 401 / 403.
-
-### 4.7 Photo Upload
-- `ADP-01` PNG/JPEG/WebP valid ≤2 MB → 200 `photo_url`; unggah ulang → URL berganti; DELETE → `photo_url:null`.
-- `ADP-02` >2 MB → 400 `Ukuran foto maksimal 2 MB`.
-- `ADP-03` PDF/TXT → 400. `ADP-04` MIME `image/jpeg` berisi teks → 400 (magic bytes). `ADP-05` field bukan `photo` / tanpa file → 400.
-- `ADP-06` employee tak ada → 404. `ADP-07` 401 / 403.
-- `ADP-08` (M3/M4) mock `deletePhotoFromBlob` melempar error → DELETE employee tetap 200 dan baris terhapus.
-
-### 4.8 Hardening
-- `HRD-01` body JSON rusak → 400 (H3). `HRD-02` body >1 MB → 413.
-- `HRD-03` `ER_DUP_ENTRY` simulasi (dua PUT paralel tautkan employee sama) → salah satu 409, bukan 500.
-- `HRD-04` response error tidak pernah memuat kata `SQL`, `ER_`, atau stack trace.
+```text
+client/
+├── .env.example                     <-- Template VITE_API_URL (tanpa kredensial)
+├── index.html                       <-- Judul "Warga Halim" + font Serif & Sans-serif + viewport
+├── package.json
+├── tsconfig.json                    <-- strict: true, noUnusedLocals, noImplicitAny
+├── tsconfig.app.json
+├── vite.config.ts
+└── src/
+    ├── main.tsx                     <-- Entry point: QueryClientProvider + BrowserRouter + Toaster
+    ├── App.tsx                      <-- Hydrate auth saat startup + Routes
+    ├── index.css                    <-- Tailwind CSS + base font (>=16px) & palet warna
+    ├── types/
+    │   ├── api.ts                   <-- Interface ApiResponse<T>
+    │   ├── auth.ts                  <-- Interface AuthUser, LoginRequest, LoginResponse
+    │   ├── employee.ts              <-- Interface PublicPhoto, EmployeeCard, EmployeeDetail
+    │   ├── memory.ts                <-- Interface MemoryItem, MemoryDetail
+    │   └── message.ts               <-- Interface MessageItem
+    ├── lib/
+    │   ├── api.ts                   <-- Fetch wrapper (base VITE_API_URL, Bearer token, auto-logout 401)
+    │   ├── queryClient.ts           <-- Konfigurasi TanStack QueryClient
+    │   ├── avatar.ts                <-- Helper warna deterministik untuk avatar inisial
+    │   └── formatDate.ts            <-- Helper format tanggal Indonesia (mis. "17 Agustus 2022")
+    ├── stores/
+    │   └── authStore.ts             <-- Zustand store + localStorage sync + hydrateAuth
+    ├── schemas/
+    │   └── auth.schema.ts           <-- Skema Zod login (pesan bahasa Indonesia)
+    ├── components/
+    │   ├── layout/
+    │   │   ├── Header.tsx           <-- Navbar responsif: logo, link menu, nama user + Keluar / Masuk
+    │   │   └── MainLayout.tsx       <-- Pembungkus Header + Main container + Footer sederhana
+    │   └── ui/
+    │       ├── Avatar.tsx           <-- Foto karyawan atau avatar inisial bulat warna deterministik
+    │       ├── LoadingSkeleton.tsx  <-- Skeleton kartu, detail, dan list
+    │       ├── EmptyState.tsx       <-- Tampilan data kosong ramah bahasa Indonesia
+    │       └── ErrorState.tsx       <-- Tampilan error + tombol "Coba Lagi" wajib
+    ├── routes/
+    │   ├── ProtectedRoute.tsx       <-- Guard user terautentikasi (`user` & `admin`)
+    │   └── AdminRoute.tsx           <-- Guard khusus `role === 'admin'`
+    ├── pages/
+    │   ├── HomePage.tsx             <-- Publik (/): galeri foto + CTA Masuk / ringkasan user login
+    │   ├── LoginPage.tsx            <-- Publik (/login): React Hook Form + Zod + Toast
+    │   ├── EmployeesPage.tsx        <-- Protected (/karyawan): live search + grid kartu
+    │   ├── EmployeeDetailPage.tsx   <-- Protected (/karyawan/:id): biodata lengkap + memories + messages
+    │   ├── MemoriesPage.tsx         <-- Protected (/kenangan): daftar kenangan urut terbaru
+    │   ├── MemoryDetailPage.tsx     <-- Protected (/kenangan/:id): cerita lengkap + tag karyawan
+    │   ├── MessagesPage.tsx         <-- Protected (/pesan): daftar semua pesan (read-only)
+    │   ├── AdminPlaceholderPage.tsx <-- Admin (/admin/*): shell placeholder untuk Tahap 6
+    │   └── NotFoundPage.tsx         <-- Fallback (*): halaman 404 bahasa Indonesia
+    └── tests/
+        ├── setup.ts                 <-- Setup Vitest + @testing-library/jest-dom + reset store
+        ├── authStore.test.ts        <-- Unit test Zustand authStore & 401 handler
+        ├── routeGuards.test.tsx     <-- Test ProtectedRoute & AdminRoute
+        ├── loginPage.test.tsx       <-- Test validasi Zod & submit LoginPage
+        └── pages.test.tsx           <-- Test HomePage, EmployeesPage, MemoriesPage, MessagesPage
+```
 
 ---
 
-## 5. Keamanan Git (cek sebelum PR)
-- `git ls-files | Select-String "\.env"` → hanya `.env.example` yang boleh muncul.
-- `git grep -nEi "(password|secret|token)\s*=\s*['\"][^'\"]{6,}"` → tidak ada nilai asli.
-- `.gitignore` sudah mencakup `.env*`, `prompt.txt`, `dist/`, `node_modules/`.
+## 3. Tahap 5A — Implementasi Backend Prerequisite (`server/`)
+
+> **Aturan Keamanan SQL:** Semua query SQL **WAJIB** menggunakan *parameterized query* (`?`) melalui `pool.query`, dilarang melakukan penggabungan string untuk nilai user, dan hanya memilih kolom yang diperlukan (tanpa `SELECT *` pada tabel `users` atau `employees`).
+
+### 3.1 Endpoint 1: `GET /api/photos` (Publik — Tanpa Token)
+
+**Tujuan:** Memberi daftar foto karyawan ke halaman Home (`/`) untuk pengunjung yang belum login tanpa membocorkan nama lengkap, panggilan, atau biodata apa pun.
+
+- **File baru:**
+  - `server/src/controllers/photo.controller.ts` (`getPublicPhotos`)
+  - `server/src/routes/photo.route.ts` (`router.get('/photos', getPublicPhotos)`)
+- **Daftarkan di `server/src/routes/index.ts`:** `router.use('/', photoRoutes);`
+- **Aturan Query SQL:**
+  ```sql
+  SELECT id, photo_url
+  FROM employees
+  WHERE status = 'published'
+    AND photo_url IS NOT NULL
+    AND photo_url <> ''
+  ORDER BY id ASC
+  ```
+- **Checklist Keamanan:**
+  - Tidak memakai middleware `authenticate`.
+  - Karyawan `status = 'draft'` tidak boleh muncul.
+  - Karyawan `published` dengan `photo_url IS NULL` atau `''` tidak boleh muncul.
+  - Tidak boleh mengembalikan `full_name`, `nickname`, `hometown`, `contact`, atau kolom selain `id` dan `photo_url`.
+
+### 3.2 Endpoint 2: `GET /api/employees/:id` (Terlindungi `authenticate`)
+
+**Tujuan:** Mengembalikan biodata lengkap satu karyawan berstatus `published`, daftar kenangan terkait (`published`), dan daftar pesan terkait (di mana pengirim maupun penerima sama-sama `published`).
+
+- **Update `server/src/schemas/employee.schema.ts`:**
+  ```ts
+  export const employeeIdParamSchema = z.object({
+    id: z.coerce
+      .number()
+      .int('ID karyawan harus berupa bilangan bulat')
+      .positive('ID karyawan harus lebih dari 0'),
+  });
+  ```
+- **Update `server/src/routes/employee.route.ts`:**
+  ```ts
+  router.get('/employees', authenticate, getEmployees);
+  router.get('/employees/:id', authenticate, getEmployeeById);
+  ```
+- **Update `server/src/controllers/employee.controller.ts` (`getEmployeeById`):**
+  1. Validasi `req.params` dengan `employeeIdParamSchema`. Jika gagal -> `400 Bad Request`.
+  2. Query detail karyawan:
+     ```sql
+     SELECT id, full_name, nickname, hometown, hobby, contact, favorite_quote, photo_url
+     FROM employees
+     WHERE id = ? AND status = 'published'
+     LIMIT 1
+     ```
+     Jika baris kosong -> **`404 Not Found`** (`"Karyawan tidak ditemukan"`).
+  3. Query kenangan terkait (`published`):
+     ```sql
+     SELECT m.id, m.title, DATE_FORMAT(m.event_date, '%Y-%m-%d') AS event_date
+     FROM memory_employees me
+     INNER JOIN memories m ON m.id = me.memory_id
+     WHERE me.employee_id = ? AND m.status = 'published'
+     ORDER BY m.event_date DESC, m.id DESC
+     ```
+  4. Query pesan terkait (pengirim **dan** penerima harus `published`):
+     ```sql
+     SELECT
+       msg.id,
+       msg.sender_employee_id,
+       s.full_name AS sender_name,
+       msg.recipient_employee_id,
+       r.full_name AS recipient_name,
+       msg.message,
+       msg.impression,
+       msg.created_at
+     FROM messages msg
+     INNER JOIN employees s ON s.id = msg.sender_employee_id
+     INNER JOIN employees r ON r.id = msg.recipient_employee_id
+     WHERE (msg.sender_employee_id = ? OR msg.recipient_employee_id = ?)
+       AND s.status = 'published'
+       AND r.status = 'published'
+     ORDER BY msg.created_at DESC, msg.id DESC
+     ```
+  5. Petakan tiap pesan dengan menambahkan `sender_initials: generateInitials(msg.sender_name)` dan `recipient_initials: generateInitials(msg.recipient_name)`.
+  6. Kembalikan `200 OK` dengan `initials: generateInitials(emp.full_name)`, `memories`, dan `messages`.
 
 ---
 
-## 6. Checklist
-- [x] H1 `any`/mass-assignment auth schema
-- [x] H2 trust proxy
-- [x] H3 error handler (400/413/409)
-- [x] M1 JWT algoritma
-- [x] M2 validasi tanggal nyata
-- [x] M3 & M4 urutan hapus blob vs DB
-- [x] M5 Vitest + Supertest + `server/.env.test`
-- [x] L1 seed admin via script
-- [x] L2–L4 refactor kecil (tanpa ubah perilaku)
-- [x] Seluruh skenario §4 lulus (`npm --prefix server test`)
-- [x] `typecheck` & `build` 0 error
-- [x] Cek keamanan Git §5, lalu PR ke `main`
+## 4. Tahap 5B — Setup Fondasi Frontend (`client/`)
 
-## 7. Laporan Akhir Wajib
-1. Daftar file dibuat/diubah. 2. Daftar endpoint + middleware. 3. Contoh request & response tiap endpoint (dari output test). 4. Hasil `npm test` (jumlah lulus/gagal per file), `typecheck`, `build`. 5. Konflik aturan baru (jika ada) dan docs yang diperbarui.
+### 4.1 Inisialisasi Project & Dependencies
+Buat folder `client/` di root monorepo (`4-kampung-halim/client`).
+
+- **Dependencies (`client/package.json`):**
+  - `react` (`^19.0.0`), `react-dom` (`^19.0.0`)
+  - `react-router-dom` (`^7.x`)
+  - `@tanstack/react-query` (`^5.x`)
+  - `zustand` (`^5.x`)
+  - `react-hook-form` (`^7.x`), `@hookform/resolvers`, `zod`
+  - `react-hot-toast`
+  - `lucide-react`
+- **DevDependencies:**
+  - `vite`, `@vitejs/plugin-react`, `typescript` (`~5.x`), `@types/react`, `@types/react-dom`
+  - `tailwindcss`, `@tailwindcss/vite` (atau konfigurasi PostCSS Tailwind yang bersih)
+  - `vitest`, `@testing-library/react`, `@testing-library/jest-dom`, `@testing-library/user-event`, `jsdom`
+- **Scripts di `client/package.json`:**
+  ```json
+  {
+    "scripts": {
+      "dev": "vite",
+      "build": "tsc -b && vite build",
+      "preview": "vite preview",
+      "typecheck": "tsc --noEmit",
+      "test": "vitest run"
+    }
+  }
+  ```
+
+### 4.2 Konfigurasi TypeScript & Environment
+- `tsconfig.json` / `tsconfig.app.json` wajib mengaktifkan:
+  ```json
+  {
+    "compilerOptions": {
+      "strict": true,
+      "noImplicitAny": true,
+      "noUnusedLocals": true,
+      "noUnusedParameters": true
+    }
+  }
+  ```
+- Buat `client/.env.example`:
+  ```env
+  VITE_API_URL=http://localhost:5000/api
+  ```
+- Pastikan `client/.env` **tidak pernah di-commit** ke Git (verifikasi dengan `git status` agar tidak ada credential yang terbawa).
+
+### 4.3 API Client (`client/src/lib/api.ts`)
+Implementasikan wrapper `fetch` bertipe generik (`apiRequest<T>(endpoint: string, options?: RequestInit): Promise<T>`):
+1. Baca base URL dari `import.meta.env.VITE_API_URL || 'http://localhost:5000/api'` (hapus trailing slash jika ada).
+2. Ambil `token` dari `useAuthStore.getState().token`. Jika ada, otomatis pasang header:
+   `Authorization: Bearer ${token}`
+3. Set `Content-Type: application/json` jika body bukan `FormData`.
+4. Parse JSON response (`ApiResponse<T>`).
+5. **Penanganan HTTP `401` Otomatis:**
+   - Jika response status **`401`** dan endpoint bukan `/auth/login`:
+     1. Panggil `useAuthStore.getState().logout()`.
+     2. Tampilkan toast `"Sesi Anda telah berakhir, silakan masuk kembali"` (gunakan `toastId` tetap agar tidak menumpuk).
+     3. Redirect ke `/login` (jika belum berada di `/login`).
+   - Jika `!response.ok` atau `json.success === false`:
+     - Lempar custom class `ApiError(response.status, json.message || 'Terjadi kesalahan pada server')`.
+   - Jika sukses: kembalikan `json.data` bertipe `T`.
+
+### 4.4 TanStack Query (`client/src/lib/queryClient.ts`)
+```ts
+import { QueryClient } from '@tanstack/react-query';
+
+export const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 1000 * 60 * 2, // 2 menit
+      retry: 1,
+      refetchOnWindowFocus: false,
+    },
+  },
+});
+```
+
+### 4.5 Zustand Auth Store (`client/src/stores/authStore.ts`)
+> **WAJIB:** Gunakan Zustand (`create`). **Jangan** membuat `React Context` atau `useReducer`!
+
+- **Key `localStorage`:** `'warga_halim_token'`. Saat startup aplikasi (`App.tsx`), **wajib** memverifikasi token lewat `GET /api/auth/me` agar perubahan `is_active = 0` atau akun dihapus langsung terdeteksi.
+- **State:**
+  - `user: AuthUser | null` (`{ id, name, email, role, employee_id, is_active }`)
+  - `token: string | null`
+  - `isAuthenticated: boolean`
+  - `isHydrated: boolean` (bernilai `false` sebelum pengecekan awal token selesai, menjadi `true` setelah `hydrateAuth()` selesai)
+- **Actions:**
+  - `setAuth(token: string, user: AuthUser): void` -> simpan token ke `localStorage`, set `token`, `user`, `isAuthenticated: true`, `isHydrated: true`.
+  - `logout(): void` -> hapus token dari `localStorage`, bersihkan `queryClient.clear()`, set `token: null`, `user: null`, `isAuthenticated: false`, `isHydrated: true`.
+  - `hydrateAuth(): Promise<void>`:
+    1. Baca token dari `localStorage`.
+    2. Jika tidak ada token -> set `isAuthenticated: false, user: null, token: null, isHydrated: true`.
+    3. Jika ada token -> pasang `token` ke state sementara, lalu panggil `GET /api/auth/me`.
+    4. Jika berhasil (`200`) -> set `user: data`, `isAuthenticated: true`, `isHydrated: true`.
+    5. Jika gagal (`401` / `403` / error auth) -> panggil `logout()` (yang juga mengeset `isHydrated: true`).
+
+---
+
+## 5. Tahap 5C — Route Guards, Layout, & Komponen UI Wajib
+
+### 5.1 Route Guards (`client/src/routes/`)
+1. **`ProtectedRoute.tsx`:**
+   - Membaca `isAuthenticated`, `isHydrated` dari `useAuthStore`.
+   - Jika `!isHydrated`, tampilkan `LoadingSkeleton` (jangan langsung redirect sebelum cek `/auth/me` selesai).
+   - Jika `isHydrated && !isAuthenticated`, `<Navigate to="/login" state={{ from: location }} replace />`.
+   - Jika terautentikasi, render `<Outlet />`.
+2. **`AdminRoute.tsx`:**
+   - Membaca `user`, `isAuthenticated`, `isHydrated` dari `useAuthStore`.
+   - Jika `!isHydrated`, tampilkan `LoadingSkeleton`.
+   - Jika `!isAuthenticated`, `<Navigate to="/login" state={{ from: location }} replace />`.
+   - Jika `user?.role !== 'admin'`, tolak akses dengan tampilan **"403 — Akses Ditolak"** berbahasa Indonesia serta tombol kembali ke `/karyawan` (atau redirect + toast `"Anda tidak memiliki izin mengakses halaman Admin"`).
+   - Jika `user?.role === 'admin'`, render `<Outlet />`.
+
+### 5.2 Header & Layout (`client/src/components/layout/`)
+- **`Header.tsx`:**
+  - Kiri: Logo/Judul `"Warga Halim"` (font serif, link ke `/`).
+  - Tengah (hanya tampil jika `isAuthenticated === true`):
+    - Link `/karyawan` ("Karyawan")
+    - Link `/kenangan` ("Kenangan")
+    - Link `/pesan` ("Pesan")
+    - Link `/admin` ("Panel Admin") -> **HANYA tampil jika `user?.role === 'admin'`**
+  - Kanan:
+    - Jika **belum login**: Tombol `"Masuk"` (warna aksen Scarlet `#E32636`, link ke `/login`).
+    - Jika **sudah login**: Tampilkan nama user (`user.name`) dan tombol `"Keluar"` (memanggil `logout()`, bersihkan cache, toast `"Anda telah keluar"`, arahkan ke `/`).
+  - **Mobile (`360px`):** Wajib memiliki menu toggle/hamburger yang mudah diklik tanpa teks terpotong atau horizontal scroll.
+
+### 5.3 Komponen State & Avatar (`client/src/components/ui/`)
+1. **`LoadingSkeleton.tsx`:** Mendukung `variant?: 'grid' | 'detail' | 'list' | 'page'` dengan animasi `animate-pulse`.
+2. **`EmptyState.tsx`:** Props `title`, `description`, dan opsional `actionLabel` + `onAction`.
+3. **`ErrorState.tsx`:** Props `message?: string` dan `onRetry?: () => void`. Wajib menampilkan tombol **"Coba Lagi"** yang memanggil `onRetry` (`refetch()` dari TanStack Query).
+4. **`Avatar.tsx`:**
+   - Props: `src?: string | null`, `name: string`, `initials?: string`, `size?: 'sm' | 'md' | 'lg' | 'xl'`.
+   - Jika `src` tersedia dan termuat: tampilkan `<img>` dengan `alt={`Foto ${name}`}` dan fallback `onError` ke avatar inisial.
+   - Jika `src` `null` / gagal dimuat: tampilkan lingkaran berisi `initials` (2 huruf kapital) dengan warna latar **deterministik** (dihitung dari string `name` di `lib/avatar.ts` sehingga warna untuk nama yang sama selalu konsisten).
+
+---
+
+## 6. Tahap 5D — Spesifikasi Detail Setiap Halaman (`client/src/pages/`)
+
+| Route | Komponen | Akses | Query / API | Perilaku & Kriteria Wajib |
+| --- | --- | --- | --- | --- |
+| `/` | `HomePage` | Publik | `GET /api/photos` (`useQuery`) | **Jika belum login:** Hero perkenalan singkat, tombol `"Masuk"` (Scarlet `#E32636`), dan galeri foto karyawan (`photo_url`) tanpa teks nama/biodata apa pun. <br>**Jika sudah login:** Sapaan hangat dengan `user.name`, kartu pintasan ke `/karyawan`, `/kenangan`, `/pesan` (dan `/admin` khusus admin), serta galeri foto. <br>Wajib punya Skeleton, EmptyState, dan ErrorState + Coba Lagi. |
+| `/login` | `LoginPage` | Publik (redirect ke `/karyawan` jika sudah login) | `POST /api/auth/login` | Gunakan `react-hook-form` + `zodResolver(loginSchema)`. Validasi: <br>- Email: wajib diisi, min 5 karakter, format email valid. <br>- Password: wajib diisi, min 6 karakter. <br>Pesan error tampil di bawah input (bahasa Indonesia). Saat loading, tombol `"Masuk"` `disabled` + teks `"Memproses..."`. Error `401`/`403`/`429` tampil via `toast.error(...)` tanpa menghapus isi email. Jika sukses -> `setAuth(token, user)`, `toast.success(...)`, redirect ke halaman tujuan atau `/karyawan`. |
+| `/karyawan` | `EmployeesPage` | Protected | `GET /api/employees?search=...` | Live search (debounce ~250ms). Grid `1` kolom (`360px`), `2` kolom (tablet), `3` kolom (desktop). Setiap kartu menampilkan `<Avatar>`, `nickname`, `full_name`, klik membuka `/karyawan/:id`. Wajib punya Skeleton, EmptyState, dan ErrorState + Coba Lagi. |
+| `/karyawan/:id` | `EmployeeDetailPage` | Protected | `GET /api/employees/:id` | Tombol kembali ke `/karyawan`. Header (`Avatar` besar, `full_name`, `nickname`). Grid biodata (`hometown`, `hobby`, `contact`, `favorite_quote`): jika `NULL`/kosong tampilkan `"Belum diisi"` atau `-` rapi. Bagian **"Kenangan Bersama"** (link ke `/kenangan/:id` + tanggal terformat). Bagian **"Pesan & Kesan"** (read-only: pesan yang dikirim atau diterima). Jika `404` -> tampilkan `"Data karyawan tidak ditemukan"` + tombol kembali. |
+| `/kenangan` | `MemoriesPage` | Protected | `GET /api/memories` | Daftar kenangan terbaru di atas (`title`, tanggal Indonesia, cuplikan `story`), klik menuju `/kenangan/:id`. Wajib Skeleton, EmptyState, ErrorState + Coba Lagi. |
+| `/kenangan/:id` | `MemoryDetailPage` | Protected | `GET /api/memories/:id` | `title`, tanggal, cerita lengkap (`whitespace-pre-line`), dan chip **Karyawan yang Terlibat** (`Avatar` + `full_name`) yang mengarah ke `/karyawan/:id`. |
+| `/pesan` | `MessagesPage` | Protected | `GET /api/messages` | Daftar pesan & kesan **read-only**: **Pengirim -> Penerima** (dengan avatar/inisial & link `/karyawan/:id`), isi `message`, serta kotak `impression` jika ada. **Tidak ada tombol tambah/edit/hapus.** |
+| `/admin/*` | `AdminPlaceholderPage` | Admin Only (`AdminRoute`) | - | Shell halaman Admin (*"Panel Admin akan diimplementasikan pada Tahap 6"*). |
+| `*` | `NotFoundPage` | Publik | - | Halaman `"404 — Halaman tidak ditemukan"` dalam bahasa Indonesia + tombol kembali ke `/`. |
+
+---
+
+## 7. Skenario Testing Lengkap Per API & Frontend (Beserta Contoh Request–Response)
+
+> **ATURAN WAJIB TESTING:**
+> 1. **Reset Data Setiap Skenario (`beforeEach`):** Setiap skenario uji backend **WAJIB** menghapus seluruh data di semua tabel terlebih dahulu sebelum menanam data uji (*seeding*) agar hasilnya 100% konsisten dan deterministik:
+>    ```sql
+>    DELETE FROM messages;
+>    DELETE FROM memory_employees;
+>    DELETE FROM memories;
+>    DELETE FROM users;
+>    DELETE FROM employees;
+>    ```
+>    *(Pastikan `server/tests/setup.ts` menjalankan hook `beforeEach` di atas untuk setiap `it(...)`).*
+> 2. **Reset State Frontend (`beforeEach`):** Setiap skenario uji frontend wajib menjalankan `localStorage.clear()`, `useAuthStore.getState().logout()`, dan `queryClient.clear()`.
+> 3. **Tanpa Kredensial Produksi:** Seluruh email/password/token pada test menggunakan data dummy lokal.
+
+### 7.1 Contoh Request & Response + Matriks Skenario Lengkap Per Endpoint API
+
+#### A. `GET /api/photos` (Publik)
+- **Contoh Request:**
+  ```http
+  GET /api/photos
+  ```
+- **Contoh Response Sukses (`200 OK`):**
+  ```json
+  {
+    "success": true,
+    "data": [
+      {
+        "id": 1,
+        "photo_url": "https://example.public.blob.vercel-storage.com/employees/1-foto.jpg"
+      }
+    ],
+    "message": "Daftar foto galeri berhasil diambil"
+  }
+  ```
+- **Skenario Test Wajib:**
+  - `API-PHOTO-01`: Ada employee A (`published`, ada `photo_url`), B (`published`, `photo_url: null`), C (`draft`, ada `photo_url`). Tanpa token -> `200 OK`, hanya mengembalikan `[ { id: A.id, photo_url } ]` tanpa field `full_name`, `nickname`, `hometown`, `contact`.
+  - `API-PHOTO-02`: Tidak ada employee berfoto -> `200 OK`, `data: []`.
+
+#### B. `POST /api/auth/login` (Publik + Rate Limit 5x/menit)
+- **Contoh Request:**
+  ```http
+  POST /api/auth/login
+  Content-Type: application/json
+
+  {
+    "email": "andi@example.com",
+    "password": "password123"
+  }
+  ```
+- **Contoh Response Sukses (`200 OK`):**
+  ```json
+  {
+    "success": true,
+    "data": {
+      "token": "<jwt_token>",
+      "user": {
+        "id": 2,
+        "name": "Andi Budi",
+        "email": "andi@example.com",
+        "role": "user",
+        "employee_id": 1,
+        "employeeId": 1,
+        "is_active": true,
+        "isActive": true
+      }
+    },
+    "message": "Login berhasil"
+  }
+  ```
+- **Contoh Response Error (`401 Unauthorized`):**
+  ```json
+  {
+    "success": false,
+    "data": null,
+    "message": "Email atau password salah"
+  }
+  ```
+- **Skenario Test Wajib:** Login sukses user (`200`), login sukses admin (`200`), password/email salah (`401` dengan pesan identik), akun nonaktif `is_active = 0` (`403`), validasi format email/password pendek (`400`), percobaan ke-6 dalam 1 menit (`429`).
+
+#### C. `GET /api/auth/me` (Protected)
+- **Contoh Request:**
+  ```http
+  GET /api/auth/me
+  Authorization: Bearer <jwt_token>
+  ```
+- **Contoh Response Sukses (`200 OK`):**
+  ```json
+  {
+    "success": true,
+    "data": {
+      "id": 2,
+      "name": "Andi Budi",
+      "email": "andi@example.com",
+      "role": "user",
+      "employee_id": 1,
+      "employeeId": 1,
+      "is_active": true,
+      "isActive": true
+    },
+    "message": "Data akun berhasil diambil"
+  }
+  ```
+- **Skenario Test Wajib:** Tanpa token -> `401`; token valid + aktif -> `200` (tanpa `password_hash`); token valid tetapi user sudah dinonaktifkan admin (`is_active = 0`) -> `403`.
+
+#### D. `GET /api/employees` (Protected)
+- **Contoh Request:**
+  ```http
+  GET /api/employees?search=Andi
+  Authorization: Bearer <jwt_token>
+  ```
+- **Contoh Response Sukses (`200 OK`):**
+  ```json
+  {
+    "success": true,
+    "data": [
+      {
+        "id": 1,
+        "full_name": "Andi Budi",
+        "nickname": "Andi",
+        "photo_url": null,
+        "initials": "AB"
+      }
+    ],
+    "message": "Daftar karyawan berhasil diambil"
+  }
+  ```
+- **Skenario Test Wajib:** Tanpa token -> `401`; token valid -> `200` hanya `published`; `?search=` cocok `full_name` atau `nickname` -> `200`; `?search=` milik `draft` -> `[]`; `?search=' OR '1'='1` (SQL injection check) -> `200` `[]` tanpa bocor data; `?search=` > 100 karakter -> `400`.
+
+#### E. `GET /api/employees/:id` (Protected)
+- **Contoh Request:**
+  ```http
+  GET /api/employees/1
+  Authorization: Bearer <jwt_token>
+  ```
+- **Contoh Response Sukses (`200 OK`):**
+  ```json
+  {
+    "success": true,
+    "data": {
+      "id": 1,
+      "full_name": "Andi Budi",
+      "nickname": "Andi",
+      "hometown": null,
+      "hobby": "Bersepeda",
+      "contact": null,
+      "favorite_quote": null,
+      "photo_url": null,
+      "initials": "AB",
+      "memories": [
+        { "id": 2, "title": "Outing Puncak 2022", "event_date": "2022-08-17" }
+      ],
+      "messages": [
+        {
+          "id": 5,
+          "sender_employee_id": 3,
+          "sender_name": "Citra Dewi",
+          "sender_initials": "CD",
+          "recipient_employee_id": 1,
+          "recipient_name": "Andi Budi",
+          "recipient_initials": "AB",
+          "message": "Terima kasih selalu membantu!",
+          "impression": "Rekan kerja yang sabar.",
+          "created_at": "2026-11-12T10:00:00.000Z"
+        }
+      ]
+    },
+    "message": "Detail biodata karyawan berhasil diambil"
+  }
+  ```
+- **Contoh Response Error (`404 Not Found` untuk `draft` / tidak ada):**
+  ```json
+  {
+    "success": false,
+    "data": null,
+    "message": "Karyawan tidak ditemukan"
+  }
+  ```
+- **Skenario Test Wajib:**
+  - `API-EMPDET-01`: Tanpa token -> `401`.
+  - `API-EMPDET-02`: Employee `published` dengan beberapa field `NULL` -> `200`, `memories` hanya menampilkan kenangan `published`, `messages` hanya menampilkan pesan antar kedua employee `published`.
+  - `API-EMPDET-03`: ID milik employee `draft` atau ID tidak ada (`99999`) -> `404`.
+  - `API-EMPDET-04`: Param ID tidak valid (`/api/employees/abc` atau `/api/employees/0`) -> `400`.
+
+#### F. `GET /api/memories` & `GET /api/memories/:id` (Protected)
+- **Contoh Request & Response `GET /api/memories` (`200 OK`):**
+  ```json
+  {
+    "success": true,
+    "data": [
+      {
+        "id": 2,
+        "title": "Outing Puncak 2022",
+        "event_date": "2022-08-17",
+        "story": "Cerita kenangan...",
+        "created_at": "2026-11-12T10:00:00.000Z"
+      }
+    ],
+    "message": "Daftar kenangan berhasil diambil"
+  }
+  ```
+- **Contoh Request & Response `GET /api/memories/2` (`200 OK`):**
+  ```json
+  {
+    "success": true,
+    "data": {
+      "id": 2,
+      "title": "Outing Puncak 2022",
+      "event_date": "2022-08-17",
+      "story": "Cerita lengkap kenangan...",
+      "employees": [
+        {
+          "id": 1,
+          "full_name": "Andi Budi",
+          "photo_url": null,
+          "initials": "AB"
+        }
+      ]
+    },
+    "message": "Detail kenangan berhasil diambil"
+  }
+  ```
+- **Skenario Test Wajib:** Tanpa token -> `401`; list urut `event_date DESC` hanya `published`; detail `draft` / tidak ada -> `404`; detail ID non-numerik -> `400`; tag employee pada detail hanya memuat karyawan `published`.
+
+#### G. `GET /api/messages` (Protected)
+- **Contoh Request:**
+  ```http
+  GET /api/messages
+  Authorization: Bearer <jwt_token>
+  ```
+- **Contoh Response Sukses (`200 OK`):**
+  ```json
+  {
+    "success": true,
+    "data": [
+      {
+        "id": 5,
+        "sender_employee_id": 3,
+        "sender_name": "Citra Dewi",
+        "sender_initials": "CD",
+        "recipient_employee_id": 1,
+        "recipient_name": "Andi Budi",
+        "recipient_initials": "AB",
+        "message": "Terima kasih selalu membantu!",
+        "impression": "Rekan kerja yang sabar.",
+        "created_at": "2026-11-12T10:00:00.000Z",
+        "updated_at": "2026-11-12T10:00:00.000Z"
+      }
+    ],
+    "message": "Daftar pesan dan kesan berhasil diambil"
+  }
+  ```
+- **Skenario Test Wajib:** Tanpa token -> `401`; hanya mengembalikan pesan dengan **kedua** employee (`sender` & `recipient`) berstatus `published`; tidak ada endpoint `POST`/`PUT`/`PATCH`/`DELETE /api/messages` untuk user biasa (`404`).
+
+---
+
+### 7.2 Skenario Test Frontend (`client/src/tests/`)
+
+| ID | Target | Skenario | Hasil yang Diharapkan |
+| --- | --- | --- | --- |
+| `FE-STORE-01` | `authStore` | `setAuth` dan `logout` | `setAuth` menyimpan token ke `localStorage`, set `isAuthenticated = true` & `user`. `logout` menghapus token dari `localStorage` dan mereset state. |
+| `FE-STORE-02` | `authStore` + `api.ts` | `hydrateAuth` valid vs `401`/`403` | Token valid -> `isAuthenticated = true`. Token ditolak (`401`/`403`) -> auto-logout & `isHydrated = true`. |
+| `FE-GUARD-01` | `ProtectedRoute` | Pengunjung vs User Login | Saat `isHydrated = false` tampil skeleton; belum login -> redirect `/login`; sudah login -> render outlet. |
+| `FE-GUARD-02` | `AdminRoute` | User biasa (`role: 'user'`) vs Admin | User biasa ditolak (`403` / redirect); Admin berhasil melihat konten. |
+| `FE-LOGIN-01` | `LoginPage` | Validasi Zod client-side | Email tidak valid / < 5 char atau password < 6 char memunculkan error bahasa Indonesia di bawah input **tanpa** memanggil `fetch`. |
+| `FE-LOGIN-02` | `LoginPage` | Submit sukses & gagal `401` | Sukses -> simpan auth & pindah halaman. Gagal `401` -> toast error muncul, isi email tidak hilang. |
+| `FE-HOME-01` | `HomePage` | Loading, Empty, Error (Coba Lagi), & Galeri Publik | Skeleton tampil saat loading; EmptyState tampil saat `[]`; tombol **"Coba Lagi"** muncul saat error dan memicu ulang fetch; galeri foto publik tampil tanpa nama karyawan. |
+| `FE-EMP-01` | `EmployeesPage` & `EmployeeDetailPage` | Live search, Avatar inisial, & Field `NULL` | Ketik di pencarian memanggil `?search=...`; `photo_url: null` merender avatar inisial; field `NULL` pada detail tampil rapi tanpa error. |
+| `FE-MEM-01` | `MemoriesPage` & `MemoryDetailPage` | Daftar & Tag Karyawan | Daftar menampilkan judul/tanggal/cuplikan; detail menampilkan cerita lengkap & chip karyawan menuju `/karyawan/:id`. |
+| `FE-MSG-01` | `MessagesPage` | Tampilan Read-Only | Menampilkan pengirim -> penerima, pesan, kesan; terverifikasi **tidak ada** tombol Tambah, Edit, atau Hapus. |
+
+---
+
+## 8. Verifikasi Akhir & Format Laporan
+
+Sebelum membuat commit / Pull Request, jalankan seluruh perintah berikut:
+
+1. **Backend (`server/`):**
+   - `npm run typecheck` (wajib 0 error)
+   - `npm test` (wajib 100% lulus)
+2. **Frontend (`client/`):**
+   - `npm run typecheck` (wajib 0 error, `strict: true`)
+   - `npm run build` (Vite production build wajib sukses)
+   - `npm test` (wajib 100% lulus)
+3. **Audit Kode & Keamanan Git:**
+   - Jalankan `git status` dan pastikan **tidak ada** `.env`, password, atau token di folder mana pun.
+   - Pastikan **0 kemunculan** `createContext`, `useReducer`, dan `: any` di `client/src/`.
+
+### Format Laporan Wajib Setelah Selesai:
+1. Daftar file lengkap yang dibuat dan dimodifikasi (`server/`, `client/`, `docs/`).
+2. Daftar seluruh endpoint yang ditambahkan/digunakan pada Tahap 5 beserta level aksesnya.
+3. Contoh Request & Response aktual di setiap endpoint dari hasil pengujian.
+4. Output hasil testing (`typecheck`, `build`, `vitest`) backend dan frontend, serta hasil audit kebersihan Git & kepatuhan PRD (`no any`, `no React Context`, `no useReducer`, `no .env`).
+
+---
+
+## 9. Acceptance Criteria (Checklist Selesai)
+
+- [ ] `GET /api/photos` dan `GET /api/employees/:id` terimplementasi aman (parameterized SQL, tanpa kebocoran data `draft`/biodata publik) dan lulus tes backend dengan DB reset tiap skenario.
+- [ ] Folder `client/` terbentuk dengan struktur profesional (`React 19 + Vite + TypeScript strict`).
+- [ ] Zustand `authStore` berfungsi penuh (login, hydrate `/auth/me`, auto-logout on `401`, logout), tanpa `React Context` maupun `useReducer`.
+- [ ] TanStack Query, React Router, dan API client (`VITE_API_URL`) berfungsi baik.
+- [ ] Halaman Home (`/`), Login (`/login`), Karyawan (`/karyawan`, `/karyawan/:id`), Kenangan (`/kenangan`, `/kenangan/:id`), Pesan (`/pesan`), Admin guard (`/admin/*`), dan `404` (`*`) berfungsi sesuai `PRD.md`.
+- [ ] Seluruh halaman data memiliki **Loading Skeleton**, **Empty State**, dan **Error State + tombol Coba Lagi**.
+- [ ] Responsif pada layar `360px` dan desktop, memakai palet Sky Blue (`#8ECDF2`), White (`#FFFFFF`), dan aksen Scarlet (`#E32636`), font serif untuk judul dan sans-serif `>= 16px` untuk isi.
+- [ ] Seluruh `typecheck`, `build`, dan `test` lulus 100%, serta tidak ada `.env` atau kredensial di Git.
 

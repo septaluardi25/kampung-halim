@@ -5,7 +5,45 @@ import app from '../src/app';
 import { pool } from '../src/db/pool';
 import { loginAs, seedEmployee, seedUser } from './setup';
 
-describe('Public APIs (Employees, Memories, Messages)', () => {
+describe('Public APIs (Photos, Employees, Memories, Messages)', () => {
+  it('API-PHOTO-01: GET /api/photos tanpa token -> hanya published berfoto & tanpa biodata', async () => {
+    const empWithPhoto = await seedEmployee('Andi Berfoto', 'Andi', 'published');
+    await seedEmployee('Budi Tanpa Foto', 'Budi', 'published');
+    const empDraftPhoto = await seedEmployee('Cici Draft', 'Cici', 'draft');
+
+    await pool.query('UPDATE employees SET photo_url = ? WHERE id = ?', [
+      'https://example.public.blob.vercel-storage.com/employees/andi.jpg',
+      empWithPhoto,
+    ]);
+    await pool.query('UPDATE employees SET photo_url = ? WHERE id = ?', [
+      'https://example.public.blob.vercel-storage.com/employees/cici.jpg',
+      empDraftPhoto,
+    ]);
+
+    const res = await request(app).get('/api/photos');
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data).toEqual([
+      {
+        id: empWithPhoto,
+        photo_url:
+          'https://example.public.blob.vercel-storage.com/employees/andi.jpg',
+      },
+    ]);
+    expect(res.body.data[0].full_name).toBeUndefined();
+    expect(res.body.data[0].nickname).toBeUndefined();
+    expect(res.body.data[0].hometown).toBeUndefined();
+    expect(res.body.data[0].contact).toBeUndefined();
+  });
+
+  it('API-PHOTO-02: GET /api/photos saat galeri kosong -> 200 dan data []', async () => {
+    await seedEmployee('Tanpa Foto', 'TF', 'published');
+    const res = await request(app).get('/api/photos');
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data).toEqual([]);
+  });
+
   it('PUB-02: GET /api/employees tanpa token -> 401; token valid -> 200 hanya published', async () => {
     await seedEmployee('Budi Draft', 'Budi', 'draft');
     await seedEmployee('Andi Published', 'Andi', 'published');
@@ -176,5 +214,87 @@ describe('Public APIs (Employees, Memories, Messages)', () => {
       .delete('/api/messages/1')
       .set('Authorization', `Bearer ${token}`);
     expect(delRes.status).toBe(404);
+  });
+
+  it('API-EMPDET-01..04: GET /api/employees/:id (401 tanpa token, 200 + filter relasi published + field NULL, 404 draft/tidak ada, 400 invalid id)', async () => {
+    const empTarget = await seedEmployee(
+      'Budi Santoso',
+      'Budi',
+      'published',
+      null,
+      'Bersepeda',
+      null,
+      null
+    );
+    const empPartner = await seedEmployee('Siti Rahma', 'Siti', 'published');
+    const empDraft = await seedEmployee('Karyawan Draft', 'KD', 'draft');
+
+    // 401 tanpa token
+    const resNoToken = await request(app).get(`/api/employees/${empTarget}`);
+    expect(resNoToken.status).toBe(401);
+
+    await seedUser('User', 'user@wargahalim.id', 'UserPass123!');
+    const token = await loginAs('user@wargahalim.id', 'UserPass123!');
+
+    // Memories: 1 published, 1 draft
+    const [memPub] = await pool.query<ResultSetHeader>(
+      `INSERT INTO memories (title, event_date, story, status) VALUES ('Outing Puncak', '2023-08-17', 'Seru', 'published')`
+    );
+    const [memDraft] = await pool.query<ResultSetHeader>(
+      `INSERT INTO memories (title, event_date, story, status) VALUES ('Rahasia Draft', '2024-01-01', 'Draft', 'draft')`
+    );
+    await pool.query(
+      `INSERT INTO memory_employees (memory_id, employee_id) VALUES (?, ?), (?, ?)`,
+      [memPub.insertId, empTarget, memDraft.insertId, empTarget]
+    );
+
+    // Messages: 1 antar published, 1 melibatkan draft
+    await pool.query(
+      `INSERT INTO messages (sender_employee_id, recipient_employee_id, message, impression) VALUES
+       (?, ?, 'Terima kasih Budi', 'Sangat membantu'),
+       (?, ?, 'Pesan melibatkan draft', 'Draft')`,
+      [empPartner, empTarget, empDraft, empTarget]
+    );
+
+    // 200 valid
+    const resValid = await request(app)
+      .get(`/api/employees/${empTarget}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(resValid.status).toBe(200);
+    expect(resValid.body.data.full_name).toBe('Budi Santoso');
+    expect(resValid.body.data.hometown).toBeNull();
+    expect(resValid.body.data.hobby).toBe('Bersepeda');
+    expect(resValid.body.data.contact).toBeNull();
+    expect(resValid.body.data.favorite_quote).toBeNull();
+    expect(resValid.body.data.initials).toBe('BS');
+    expect(resValid.body.data.memories).toHaveLength(1);
+    expect(resValid.body.data.memories[0].title).toBe('Outing Puncak');
+    expect(resValid.body.data.messages).toHaveLength(1);
+    expect(resValid.body.data.messages[0].message).toBe('Terima kasih Budi');
+    expect(resValid.body.data.messages[0].sender_initials).toBe('SR');
+    expect(resValid.body.data.messages[0].recipient_initials).toBe('BS');
+
+    // 404 draft
+    const resDraft = await request(app)
+      .get(`/api/employees/${empDraft}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(resDraft.status).toBe(404);
+
+    // 404 tidak ada
+    const resNotFound = await request(app)
+      .get('/api/employees/99999')
+      .set('Authorization', `Bearer ${token}`);
+    expect(resNotFound.status).toBe(404);
+
+    // 400 invalid param
+    const resInvalid1 = await request(app)
+      .get('/api/employees/abc')
+      .set('Authorization', `Bearer ${token}`);
+    expect(resInvalid1.status).toBe(400);
+
+    const resInvalid2 = await request(app)
+      .get('/api/employees/0')
+      .set('Authorization', `Bearer ${token}`);
+    expect(resInvalid2.status).toBe(400);
   });
 });

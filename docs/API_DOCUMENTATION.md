@@ -132,8 +132,8 @@ Seluruh endpoint pada bagian ini wajib melewati middleware `authenticate` (JWT v
 
 ### 3.2 `GET /api/employees`
 - **Akses:** User atau Admin
-- **Query Param:** `search` (opsional, string pencarian pada `full_name`).
-- **Deskripsi:** Mengambil daftar karyawan berstatus `published` untuk halaman `/karyawan`.
+- **Query Param:** `search` (opsional, string pencarian pada `full_name` atau `nickname`).
+- **Deskripsi:** Mengambil daftar karyawan berstatus `published` untuk halaman `/karyawan` (menampilkan nama panggilan, nama lengkap, serta foto atau inisial sesuai PRD).
 - **Respons `200 OK`:**
   ```json
   {
@@ -142,6 +142,7 @@ Seluruh endpoint pada bagian ini wajib melewati middleware `authenticate` (JWT v
       {
         "id": 1,
         "full_name": "Andi Budi",
+        "nickname": "Andi",
         "photo_url": "https://xxx.public.blob.vercel-storage.com/employees/1.jpg",
         "initials": "AB"
       }
