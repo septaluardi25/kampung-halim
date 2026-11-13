@@ -12,7 +12,7 @@ Dokumen analisis dan rencana pengembangan ini disusun berdasarkan [PRD.md](file:
 | **F1** | Halaman Beranda / Home (`/`) | Publik | Menampilkan galeri foto-foto karyawan (tanpa biodata) untuk pengunjung belum login + tombol Masuk (`/login`); bagi user login menjadi gerbang menu navigasi ke Karyawan, Kenangan, dan Pesan & Kesan. |
 | **F2** | Karyawan dan Biodata (`/karyawan`, `/karyawan/:id`) | User & Admin | Daftar kartu karyawan (foto atau avatar inisial, nama panggilan dan nama lengkap) + live search nama; halaman detail berisi foto/avatar, biodata lengkap, kenangan terkait, serta pesan yang diterima/dikirim. |
 | **F3** | Kenangan (`/kenangan`, `/kenangan/:id`) | User & Admin | Daftar kenangan bertanggal terbaru di atas (judul, tanggal, potongan cerita) dan detail cerita lengkap beserta daftar karyawan yang di-tag (klik nama mengarah ke `/karyawan/:id`). |
-| **F4** | Pesan dan Kesan (`/pesan`) | User (tulis & edit pesan sendiri) & Admin (hapus/kelola) | Menampilkan seluruh pesan antar karyawan (1 karyawan dapat memiliki banyak pesan). User tertaut dapat menulis pesan & mengedit pesannya sendiri (server mengunci pengirim dari token login). User belum tertaut ditolak menulis pesan; user dilarang mengubah pesan orang lain. Admin dapat menghapus pesan. |
+| **F4** | Pesan dan Kesan (`/pesan`) | User & Admin | Menampilkan seluruh pesan antar karyawan (1 karyawan dapat memiliki banyak pesan) untuk dibaca user login. Hanya dapat ditambah dan dihapus oleh Admin melalui Panel Admin (tanpa fitur edit). |
 | **F5** | Login & Sesi User (`/login`) | Publik & Terproteksi | Login email & password untuk user & admin (tanpa halaman `/daftar` & tanpa halaman `/akun`). Token JWT disimpan di Zustand (`localStorage`). Header menampilkan nama user + tombol Keluar (plus Panel Admin untuk admin). |
 | **F6** | Panel Admin (`/admin/*`) | Admin | CRUD Karyawan (+ unggah/ganti/hapus foto JPG/PNG/WebP maks 2 MB ke Vercel Blob), CRUD Kenangan (+ tag karyawan), Kelola/Hapus Pesan, dan CRUD Akun User (termasuk aktif/nonaktifkan). |
 
@@ -24,7 +24,7 @@ Dokumen analisis dan rencana pengembangan ini disusun berdasarkan [PRD.md](file:
 | Peran | Autentikasi | Boleh Melihat | Boleh Mengubah / Mengelola | Ditolak |
 | --- | --- | --- | --- | --- |
 | **Pengunjung** | Tanpa login | Home (`/`, hanya galeri foto-foto via `GET /api/photos`), Login (`/login`), Not Found (`*`) | Tidak ada | Daftar karyawan, biodata karyawan (diri maupun orang lain), kenangan, pesan & kesan, dan Panel Admin (otomatis diarahkan ke `/login`). |
-| **User** | Login JWT (`role = 'user'`, `is_active = 1`) | Semua halaman & data berstatus `published`: Home, `/karyawan`, `/karyawan/:id`, `/kenangan`, `/kenangan/:id`, `/pesan` | Menulis dan mengedit pesan miliknya sendiri (khusus jika akun tertaut ke profil karyawan) | Panel Admin (`/admin/*`), data berstatus `draft`, mengubah pesan orang lain, dan menulis pesan jika akun belum ditautkan (`employee_id` null). |
+| **User** | Login JWT (`role = 'user'`, `is_active = 1`) | Semua halaman & data berstatus `published`: Home, `/karyawan`, `/karyawan/:id`, `/kenangan`, `/kenangan/:id`, `/pesan` | Tidak ada (hanya membaca seluruh data terbit) | Panel Admin (`/admin/*`), data berstatus `draft`, serta menambah, mengubah, atau menghapus data apa pun. |
 | **Admin** | Login JWT (`role = 'admin'`, `is_active = 1`) | Semua data (termasuk `draft` & `published`) serta seluruh modul Panel Admin | Mengelola karyawan, foto karyawan, kenangan + tag, akun user (tambah/ubah/nonaktif/hapus), serta tambah & hapus pesan | Dicegah menonaktifkan atau menghapus akun admin miliknya sendiri. |
 
 ---
@@ -62,7 +62,7 @@ Database menggunakan MySQL (`utf8mb4`) dengan library `mysql2` (connection pool 
 
 ### 5. Identifikasi Seluruh API Endpoint
 - **Publik:** `GET /api/photos` (hanya URL foto karyawan `published` tanpa biodata), `POST /api/auth/login`.
-- **User atau Admin (wajib JWT & `is_active = 1`):** `GET /api/auth/me`, `GET /api/employees?search=`, `GET /api/employees/:id`, `GET /api/memories`, `GET /api/memories/:id`, `GET /api/messages`, `POST /api/messages` (tulis pesan), `PUT /api/messages/:id` (ubah pesan sendiri), `DELETE /api/messages/:id` (hapus pesan sendiri).
+- **User atau Admin (wajib JWT & `is_active = 1`):** `GET /api/auth/me`, `GET /api/employees?search=`, `GET /api/employees/:id`, `GET /api/memories`, `GET /api/memories/:id`, `GET /api/messages`.
 - **Admin (`role === 'admin'`):**
   - `GET, POST, PUT, DELETE /api/admin/employees` (+ `/:id`)
   - `POST, DELETE /api/admin/employees/:id/photo`
@@ -328,17 +328,13 @@ flowchart TD
   - Tanpa token ditolak `401`.
   - Daftar terurut dari kejadian terbaru; detail mengembalikan cerita lengkap + karyawan `published` yang di-tag; kenangan `draft` mengembalikan `404` untuk role `user`.
 
-#### `T-11` — Endpoint Pesan dan Kesan (`GET, POST, PUT, DELETE /api/messages`)
-- **Deskripsi:** Membuat endpoint membaca seluruh pesan terbit (`GET`), menulis pesan baru (`POST`), mengubah pesan milik sendiri (`PUT /:id`), dan menghapus pesan sendiri atau oleh admin (`DELETE /:id`), terproteksi `authenticate`.
+#### `T-11` — Endpoint Login `GET /api/messages`
+- **Deskripsi:** Membuat endpoint membaca seluruh pesan dan kesan terbit (`GET /api/messages`), di mana pengirim dan penerima keduanya berstatus `published`, terproteksi `authenticate`. Tidak ada endpoint tulis/ubah/hapus pesan untuk user.
 - **Dependency:** `T-04`, `T-07`
 - **Acceptance Criteria:**
   - Tanpa token ditolak `401`.
-  - `GET` mengembalikan seluruh pesan terbit (pengirim & penerima `published`).
-  - `POST`: user belum ditautkan (`req.user.employee_id === null`) ditolak `403`.
-  - `POST`: server mengunci `sender_employee_id` dari `req.user.employee_id` (anti-impersonasi, abaikan input body).
-  - `POST`: kirim pesan ke diri sendiri (`recipient_employee_id === req.user.employee_id`) ditolak `400`.
-  - `PUT /:id`: user mengubah pesan milik orang lain ditolak server `403`.
-  - `DELETE /:id`: hanya pemilik pesan atau admin yang boleh menghapus (`403` bila user lain).
+  - `GET /api/messages` mengembalikan seluruh pesan terbit (pengirim & penerima `published`), terurut `created_at DESC`.
+  - Tidak ada endpoint `POST`, `PUT`, `PATCH`, atau `DELETE` di `/api/messages`.
 
 ---
 
@@ -376,12 +372,13 @@ flowchart TD
   - Tidak ada route `PUT /api/admin/messages/:id`.
 
 #### `T-16` — API Admin Kelola Akun User (`/api/admin/users`)
-- **Deskripsi:** Implementasi `GET`, `POST`, `PUT`, `DELETE` akun user khusus `admin` dengan hash `bcryptjs` (salt rounds: 10) dan validasi Zod (`name` min 5, `email` min 5 & format email valid, `password` min 6) serta validasi email unik (`409`).
+- **Deskripsi:** Implementasi `GET`, `POST`, `PUT`, `DELETE` akun user khusus `admin` dengan hash `bcryptjs` (salt rounds: 10), validasi Zod (`name` min 5, `email` min 5 & format email valid, `password` min 6), validasi email unik (`409`), serta penautan `employee_id` eksklusif pada `PUT /api/admin/users/:id`.
 - **Dependency:** `T-07`
 - **Acceptance Criteria:**
   - `GET` tidak pernah mengembalikan `password_hash`.
-  - `POST` membuat user (`role = 'user'`) dengan password di-crypt menggunakan `bcryptjs`; validasi Zod (`name` >= 5, `email` >= 5, `password` >= 6); email duplikat ditolak `409`.
-  - `PUT` dapat mengubah data (`name` min 5 jika diisi, `password` min 6 jika diisi & di-crypt) & status `is_active`; admin dicegah menonaktifkan/menghapus akun dirinya sendiri (`400`).
+  - `POST` membuat user (`role = 'user'`, `employee_id = NULL`) dengan password di-crypt menggunakan `bcryptjs`; validasi Zod (`name` >= 5, `email` >= 5, `password` >= 6); email duplikat ditolak `409`.
+  - `PUT` dapat mengubah data (`name` min 5, `email` min 5, `password` min 6 jika diisi & di-crypt), status `is_active`, dan penautan `employee_id` (`number | null`, ditolak `409` jika sudah ditautkan ke akun lain dan `400` jika ID karyawan tidak ditemukan). Admin dicegah mengubah role maupun menonaktifkan akun dirinya sendiri (`400`).
+  - `DELETE` menghapus akun user lain; admin dicegah menghapus dirinya sendiri (`400`).
 
 #### `T-17` — Skrip CLI Reset Password Admin
 - **Deskripsi:** Skrip lokal di `server/src/db/` untuk memperbarui `password_hash` akun admin secara aman menggunakan `bcryptjs`.
@@ -460,14 +457,12 @@ flowchart TD
   - Tersedia kondisi loading, kosong, dan error + coba lagi.
 
 #### `T-26` — Halaman Pesan dan Kesan (`/pesan`)
-- **Deskripsi:** Halaman terproteksi login menggunakan TanStack Query untuk membaca seluruh pesan antar karyawan, serta menyediakan form tulis & dialog ubah pesan bagi user yang akunnya sudah tertaut ke karyawan.
+- **Deskripsi:** Halaman terproteksi login menggunakan TanStack Query (`GET /api/messages`) untuk membaca seluruh pesan dan kesan antar karyawan (khusus baca, tanpa form tulis/edit pesan bagi user).
 - **Dependency:** `T-11`, `T-19`, `T-20`
 - **Acceptance Criteria:**
   - Pengunjung tanpa login diarahkan ke `/login`.
   - Menampilkan seluruh pesan beserta identitas pengirim & penerima dan kesan opsional.
-  - User tertaut dapat membuka modal/form untuk menulis pesan baru dan mengedit pesan miliknya sendiri.
-  - User belum tertaut (`employee_id === null`) melihat pesan peringatan bahwa akun belum ditautkan dan tombol tulis pesan dinonaktifkan.
-  - Tidak ada opsi ubah pada pesan yang ditulis oleh user lain.
+  - Tidak ada tombol tulis, edit, maupun hapus pesan bagi user biasa.
   - Tersedia kondisi loading, kosong, dan error + coba lagi.
 
 ---

@@ -20,9 +20,6 @@ Memastikan seluruh fitur MVP (F1–F6), aturan hak akses (Pengunjung, User, Admi
 | `/karyawan`, `/karyawan/:id` & `GET /api/employees*` | **Ditolak** (`401` API, redirect `/login` di UI) | **Boleh** (hanya `published`) | **Boleh** |
 | `/kenangan`, `/kenangan/:id` & `GET /api/memories*` | **Ditolak** (`401` API, redirect `/login` di UI) | **Boleh** (hanya `published`) | **Boleh** |
 | `/pesan` & `GET /api/messages` | **Ditolak** (`401` API, redirect `/login` di UI) | **Boleh** (baca seluruh pesan terbit) | **Boleh** (lihat semua pesan) |
-| Tulis Pesan (`POST /api/messages`) | **Ditolak** (`401`) | **Boleh** jika tertaut (`employee_id NOT NULL`); **Ditolak** (`403`) jika belum tertaut | **Boleh** |
-| Ubah Pesan (`PUT /api/messages/:id`) | **Ditolak** (`401`) | **Boleh** (hanya pesan milik sendiri); **Ditolak** (`403`) jika pesan milik orang lain | **Boleh** |
-| Hapus Pesan (`DELETE /api/messages/:id`) | **Ditolak** (`401`) | **Boleh** (hanya pesan milik sendiri); **Ditolak** (`403`) jika bukan pemilik | **Boleh** (semua pesan) |
 | `/admin/*` & `/api/admin/*` | **Ditolak** (`401` API, redirect `/login` di UI) | **Ditolak** (`403` API, ditolak di UI) | **Boleh** (termasuk data `draft`) |
 | `/daftar` & `POST /api/auth/register` | **Tidak Ada** (`404` / `*`) | **Tidak Ada** | **Tidak Ada** |
 
@@ -82,14 +79,9 @@ Memastikan seluruh fitur MVP (F1–F6), aturan hak akses (Pengunjung, User, Admi
 
 | ID | Skenario Uji | Langkah | Hasil yang Diharapkan |
 | --- | --- | --- | --- |
-| `TC-F4-01` | Baca semua pesan sebagai User | Login sebagai `user`, buka `/pesan`. | Seluruh pesan antar karyawan (di mana pengirim & penerima `published`) tampil dengan label jelas pengirim -> penerima dan kesan opsional. |
-| `TC-F4-02` | Tulis pesan oleh User tertaut | Login sebagai user yang akunnya tertaut ke karyawan (`employee_id IS NOT NULL`), kirim form tulis pesan ke rekan kerja lain. | Pesan berhasil dibuat (`201 Created`), langsung muncul di `/pesan` dan profil penerima, serta `sender_employee_id` otomatis diisi ID karyawan user login. |
-| `TC-F4-03` | User belum ditautkan dilarang menulis pesan | Login sebagai user yang `employee_id IS NULL`, coba submit `POST /api/messages` atau buka form di `/pesan`. | UI menampilkan status belum tertaut dan menonaktifkan form; request API ditolak server dengan HTTP `403 Forbidden`. |
-| `TC-F4-04` | User mengubah pesan miliknya sendiri | Login sebagai user pembuat pesan, ubah isi pesan via form edit / `PUT /api/messages/:id`. | Pesan berhasil diperbarui (`200 OK`), kolom `updated_at` ter-refresh, dan isi pesan baru tampil di UI. |
-| `TC-F4-05` | User mengubah pesan orang lain | Login sebagai User A, coba kirim request `PUT /api/messages/:id` milik pesan yang dibuat oleh User B. | Server menolak dengan HTTP `403 Forbidden` (`"Anda tidak memiliki izin untuk mengubah pesan ini"`). Pesan asli tidak berubah. |
-| `TC-F4-06` | Anti-Impersonasi (Kepemilikan Pesan) | Kirim request `POST /api/messages` dengan menyisipkan payload `sender_employee_id: 99` berbeda dari akun login. | Server mengabaikan `sender_employee_id` dari body dan tetap menetapkan `sender_employee_id = req.user.employee_id` dari token sesi login yang sah. |
-| `TC-F4-07` | Cegah kirim ke diri sendiri | Coba buat pesan dengan `recipient_employee_id` bernilai sama dengan `req.user.employee_id`. | Server menolak dengan HTTP `400 Bad Request` (`"Tidak dapat mengirim pesan kepada diri sendiri"`). |
-| `TC-F4-08` | Hapus pesan sendiri / oleh admin | Hapus pesan milik sendiri sebagai user pembuat pesan, atau hapus pesan apa pun sebagai admin via `DELETE /api/messages/:id`. | Pesan berhasil dihapus (`200 OK`) dan hilang dari daftar. Jika user lain mencoba menghapus pesan tersebut, server membalas `403 Forbidden`. |
+| `TC-F4-01` | Baca semua pesan sebagai User | Login sebagai `user`, buka `/pesan` dan panggil `GET /api/messages`. | Seluruh pesan antar karyawan (di mana pengirim & penerima `published`) tampil dengan label jelas pengirim -> penerima dan kesan opsional. Tidak ada tombol tulis/ubah/hapus pesan bagi user biasa. |
+
+*(Pengujian penambahan dan penghapusan pesan oleh Admin dicakup pada `TC-F6-05`.)*
 
 ---
 
@@ -97,13 +89,13 @@ Memastikan seluruh fitur MVP (F1–F6), aturan hak akses (Pengunjung, User, Admi
 
 | ID | Skenario Uji | Langkah | Hasil yang Diharapkan |
 | --- | --- | --- | --- |
-| `TC-F6-01` | Proteksi role Admin | Login sebagai `user` biasa, coba buka `/admin/employees` dan panggil `GET /api/admin/employees`. | UI menolak akses `/admin/*`; API membalas `403 Forbidden`. |
+| `TC-F6-01` | Proteksi role Admin | Login sebagai `user` biasa, coba buka `/admin/employees` dan panggil seluruh endpoint `/api/admin/*`. | UI menolak akses `/admin/*`; seluruh endpoint `/api/admin/*` membalas HTTP `403 Forbidden`. |
 | `TC-F6-02` | CRUD Karyawan + Draft/Terbit | Tambah karyawan `Draft`, cek di `/karyawan` sebagai user (tidak ada), lalu ubah ke `Terbit`, cek lagi; lakukan edit dan hapus dengan konfirmasi. | Draft tersembunyi dari user, Terbit langsung muncul, tombol Simpan nonaktif saat loading, hapus meminta konfirmasi, dan setiap aksi memunculkan toast sukses/gagal. |
-| `TC-F6-03` | Upload, ganti, & hapus foto (Vercel Blob) | Unggah file PDF/TXT atau gambar > 2 MB (uji negatif), lalu unggah JPG/PNG/WebP <= 2 MB (uji positif), ganti foto, lalu hapus foto. | File salah format / > 2 MB ditolak di client **dan** di server (`400`); foto valid terunggah ke Vercel Blob, `photo_url` tersimpan, foto lama terganti/terhapus saat ganti/hapus foto. |
-| `TC-F6-04` | CRUD Kenangan + Tag Karyawan | Buat/ubah kenangan dengan beberapa tag karyawan, hapus salah satu tag, lalu hapus kenangan (dengan konfirmasi). | Relasi `memory_employees` tersinkronisasi dengan benar; menghapus kenangan tidak menghapus karyawan. |
-| `TC-F6-05` | Tambah & Hapus Pesan + Validasi Pengirim=Penerima | Coba kirim pesan dengan pengirim dan penerima sama; lalu kirim pesan valid; lalu hapus pesan setelah konfirmasi. | Pengirim = penerima ditolak (`400`); pesan valid langsung tampil di `/pesan` dan `/karyawan/:id`; hapus langsung menghilangkan pesan. |
-| `TC-F6-06` | Kelola Akun User | Buat user baru (nama min 5, email min 5, password min 6), coba password < 6 karakter / nama < 5 karakter (`400`), coba email duplikat (`409`), nonaktifkan user, aktifkan kembali, coba hapus akun admin sendiri, hapus user lain. | Password di-crypt dengan `bcryptjs` (tidak disimpan plaintext), validasi panjang karakter berjalan aman, email duplikat ditolak `409`; admin tidak bisa menonaktifkan/menghapus akun dirinya sendiri (`400`); perubahan status user langsung berpengaruh saat login/akses API. |
-| `TC-F6-07` | Cascade delete karyawan | Hapus seorang karyawan yang punya pesan (sebagai pengirim & penerima) dan tag kenangan. | Pesan dan tag terkait ikut terhapus (`ON DELETE CASCADE`), tetapi data cerita kenangan di `memories` tetap utuh. |
+| `TC-F6-03` | Upload, ganti, & hapus foto (Vercel Blob + Magic Bytes) | Unggah file PDF/TXT, gambar > 2 MB, atau file teks dengan MIME palsu `image/jpeg` (uji negatif), lalu unggah JPG/PNG/WebP <= 2 MB yang valid (uji positif), ganti foto, lalu hapus foto. | File > 2 MB, format salah, maupun MIME palsu (magic bytes tidak cocok) ditolak di server (`400`); foto valid terunggah ke Vercel Blob (atau URL lokal saat test), `photo_url` tersimpan, foto lama terhapus saat ganti/hapus foto. |
+| `TC-F6-04` | CRUD Kenangan + Tag Karyawan | Buat/ubah kenangan dengan beberapa tag karyawan dalam transaksi DB, hapus salah satu tag, coba tag ID tidak valid, lalu hapus kenangan. | Relasi `memory_employees` tersinkronisasi secara atomik (rollback jika gagal); ID karyawan tidak valid ditolak (`400`); menghapus kenangan tidak menghapus karyawan. |
+| `TC-F6-05` | Tambah & Hapus Pesan (Tanpa Fitur Edit) | Coba kirim pesan dengan pengirim dan penerima sama; kirim pesan valid; cek tidak ada endpoint `PUT`/`PATCH` pesan; hapus pesan setelah konfirmasi. | Pengirim = penerima ditolak (`400`); pesan valid langsung aktif/tampil di `GET /api/messages`; request `PUT`/`PATCH` ke `/api/admin/messages/:id` mengembalikan `404`; hapus langsung menghilangkan pesan. |
+| `TC-F6-06` | Kelola Akun User & Penautan Karyawan | Buat user baru (nama min 5, email min 5, password min 6), coba email duplikat (`409`), tautkan `employee_id` lewat `PUT /api/admin/users/:id`, coba tautkan `employee_id` yang sama ke user lain (`409`), nonaktifkan user, lalu hapus user lain. | Password di-crypt `bcryptjs`, `role` terkunci `'user'`, email duplikat ditolak `409`, 1 `employee_id` hanya bisa ke 1 user (`409`), admin tidak bisa menonaktifkan/menghapus dirinya sendiri (`400`), dan status `is_active` langsung memengaruhi login/token. |
+| `TC-F6-07` | Cascade delete karyawan | Hapus seorang karyawan yang punya pesan (sebagai pengirim & penerima), tag kenangan, dan akun user tertaut. | Pesan dan tag terkait ikut terhapus (`ON DELETE CASCADE`), cerita kenangan di `memories` tetap utuh, dan akun user tetap ada dengan `employee_id = NULL` (`ON DELETE SET NULL`). |
 
 ---
 
@@ -114,14 +106,13 @@ Tabel berikut memetakan pengujian aturan khusus wajib aplikasi Warga Halim:
 | Skenario | Hasil yang Diharapkan | Mekanisme & Penanganan Sistem | Kode Test Case |
 | --- | --- | --- | --- |
 | **Pengunjung membuka biodata** | Ditolak dan diarahkan login | Request `GET /api/employees/:id` tanpa token ditolak HTTP `401`; router frontend langsung me-redirect ke `/login`. | `TC-F1-03`, `TC-F2-05` |
-| **User membuka panel admin** | Ditolak | Akses `/admin/*` di frontend dicegat guard; endpoint `/api/admin/*` membalas HTTP `403 Forbidden`. | `TC-F6-01` |
-| **User belum ditautkan** | Tidak bisa menulis pesan | Jika `users.employee_id IS NULL`, form tulis pesan di `/pesan` dinonaktifkan dengan status belum tertaut; request `POST /api/messages` ditolak server HTTP `403 Forbidden`. | `TC-F4-03` |
-| **User mengubah pesan orang lain** | Ditolak server | Tombol ubah hanya muncul pada pesan milik user sendiri; request `PUT /api/messages/:id` untuk pesan orang lain ditolak server HTTP `403 Forbidden`. | `TC-F4-05` |
+| **User membuka panel admin** | Ditolak | Akses `/admin/*` di frontend dicegat guard; seluruh endpoint `/api/admin/*` membalas HTTP `403 Forbidden`. | `TC-F6-01` |
+| **User mengubah/menambah/menghapus pesan** | Ditolak (`404` / tidak tersedia) | Sesuai PRD terbaru, tidak ada endpoint tulis/ubah/hapus pesan untuk user dan tidak ada fitur edit pesan (`PUT`/`PATCH`) di aplikasi. | `TC-F4-01`, `TC-F6-05` |
 | **Admin menghapus karyawan** | Pesan dan tag terkait ikut terhapus, akun tetap ada | Database MySQL mengeksekusi `ON DELETE CASCADE` pada tabel `messages` dan `memory_employees`, serta `ON DELETE SET NULL` pada kolom `users.employee_id` (akun user tidak terhapus). | `TC-F6-07` |
-| **User nonaktif login** | Ditolak | Login akun dengan `is_active = 0` ditolak HTTP `403/401`; token aktif dari akun yang baru dinonaktifkan ditolak middleware auth dengan HTTP `403 Forbidden`. | `TC-AUTH-06` |
-| **Pengunjung melihat daftar karyawan** | Ditolak dan diarahkan login (hanya melihat foto di Home) | Sesuai keputusan arsitektur: Pengunjung belum login hanya boleh melihat foto di Home (`/`); rute `/karyawan` terproteksi login dan kolom `position`/jabatan telah ditiadakan. | `TC-F1-01`, `TC-F1-03` |
-| **User melihat daftar karyawan** | Biodata lengkap hanya melalui endpoint detail yang terlindungi | Endpoint daftar `GET /api/employees` hanya mengembalikan data kartu ringkas (nama lengkap, panggilan, foto/avatar); biodata lengkap (kota asal, hobi, kontak, kutipan, kenangan, pesan) hanya dapat diakses via `GET /api/employees/:id`. | `TC-F2-01`, `TC-F2-04` |
-| **Integritas Kepemilikan Pesan** | Server wajib mengambil `employee_id` dari akun yang terautentikasi | Endpoint `POST /api/messages` membaca `req.user.employee_id` dari payload JWT yang valid dan mengabaikan/menolak payload `sender_employee_id` dari body request untuk mencegah pemalsuan identitas pengirim. | `TC-F4-06` |
+| **User nonaktif login** | Ditolak | Login akun dengan `is_active = 0` ditolak HTTP `403`; token aktif dari akun yang baru dinonaktifkan ditolak middleware `authenticate` dengan HTTP `403 Forbidden`. | `TC-AUTH-06` |
+| **Pengunjung melihat daftar karyawan** | Ditolak dan diarahkan login (hanya melihat foto di Home) | Pengunjung belum login hanya boleh melihat foto di Home (`/`); rute `/karyawan` terproteksi login dan kolom `position`/jabatan telah ditiadakan. | `TC-F1-01`, `TC-F1-03` |
+| **User melihat daftar karyawan** | Biodata lengkap hanya melalui endpoint detail yang terlindungi | Endpoint daftar `GET /api/employees` hanya mengembalikan data kartu ringkas (nama lengkap, panggilan, foto/avatar); biodata lengkap hanya dapat diakses via `GET /api/employees/:id`. | `TC-F2-01`, `TC-F2-04` |
+| **1 Employee maksimal 1 Akun User** | Penautan ganda ditolak server | Penautan `employee_id` hanya diizinkan lewat `PUT /api/admin/users/:id` dan menolak `409 Conflict` jika karyawan sudah ditautkan ke user lain. | `TC-F6-06` |
 
 ---
 
@@ -145,7 +136,7 @@ Seluruh poin berikut wajib bernilai **LULUS** sebelum proyek dinyatakan selesai:
 - [ ] Frontend menggunakan **Vite + React 19 + TypeScript (`strict`, tanpa `any`)**, **TanStack Query**, dan **Zustand** (terverifikasi tidak ada `React Context` dan `useReducer`).
 - [ ] Data peluncuran terpenuhi: minimal **10 akun user**, minimal **10 karyawan lengkap (target 25)**, minimal **5 kenangan terbit**, dan minimal **10 pesan & kesan**.
 - [ ] Pengunjung belum login hanya bisa melihat foto-foto di Home (`/`) dan Login (`/login`).
-- [ ] User login bisa membaca semua data terbit, serta menulis & mengedit pesannya sendiri (bila akun telah ditautkan ke profil karyawan).
+- [ ] User login bisa membaca semua data terbit dan tidak dapat menambah, mengubah, atau menghapus data apa pun.
 - [ ] Admin dapat mengelola seluruh data, foto ke Vercel Blob, akun user, dan menghapus pesan.
 - [ ] Tampilan teruji di `360px` (HP) dan desktop tanpa error serta waktu muat utama < 3 detik (Lighthouse).
 - [ ] Ter-deploy di Vercel (client, server, MySQL eksternal, Vercel Blob), password admin bukan password seed, `.env` tidak masuk Git, dan `README.md` tersedia.

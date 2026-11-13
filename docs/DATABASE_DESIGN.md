@@ -13,7 +13,7 @@ Dokumen desain database ini disusun berdasarkan [PRD.md](file:///c:/Users/dimas/
 - **Konvensi Timestamp:**
   - `users`, `employees`, dan `memories` memiliki `created_at` dan `updated_at`.
   - `memory_employees` hanya memiliki `created_at` (tanpa `updated_at`, sesuai PRD).
-  - `messages` hanya memiliki `created_at` (tanpa `updated_at` karena tidak ada fitur edit pesan, sesuai PRD).
+  - `messages` memiliki `created_at` dan `updated_at` pada skema DDL `schema.sql`, namun secara aturan bisnis tidak ada operasi edit pesan (`PUT`/`PATCH`).
 - **Penyimpanan Foto:** Foto tidak disimpan di database. Kolom `employees.photo_url` hanya menyimpan URL publik dari **Vercel Blob**.
 
 ---
@@ -171,7 +171,7 @@ Tabel pivot *many-to-many* antara `memories` dan `employees` untuk tag karyawan 
 
 ### 3.5 `messages`
 
-Menyimpan pesan dan kesan antar karyawan (pengirim -> penerima). Sesuai PRD, tidak ada fitur edit pesan sehingga tabel ini **tidak memiliki** `updated_at` maupun `status` (pesan yang dibuat admin langsung aktif/terbit dan dapat dihapus jika diperlukan).
+Menyimpan pesan dan kesan antar karyawan (pengirim -> penerima). Sesuai PRD, pesan hanya ditambah dan dihapus oleh admin tanpa fitur edit pesan (`PUT`/`PATCH`) maupun kolom `status` (pesan yang dibuat admin langsung aktif/terbit).
 
 | Kolom | Tipe Data | Constraint | Keterangan |
 | --- | --- | --- | --- |
@@ -207,10 +207,9 @@ Menyimpan pesan dan kesan antar karyawan (pengirim -> penerima). Sesuai PRD, tid
    - Endpoint publik `GET /api/photos` hanya membaca kolom `id` dan `photo_url` dari `employees` dengan `status = 'published' AND photo_url IS NOT NULL`.
 4. **Satu Karyawan Banyak Pesan:**
    - Tidak ada *unique constraint* pada `(sender_employee_id, recipient_employee_id)` sehingga satu karyawan dapat mengirim banyak pesan ke berbagai karyawan lain (termasuk lebih dari satu pesan ke penerima yang sama).
-5. **Aturan Kepemilikan & Integritas Pesan:**
-   - Server wajib mengambil `sender_employee_id` dari akun yang terautentikasi (`req.user.employee_id`), bukan mempercayai `sender_employee_id` yang dikirim dari frontend, sehingga user tidak bisa menulis pesan atas nama orang lain.
-   - User yang akunnya belum ditautkan ke data karyawan (`users.employee_id IS NULL`) dilarang menulis pesan (ditolak server dengan HTTP `403 Forbidden`).
-   - User hanya berhak mengubah pesan miliknya sendiri (`message.sender_employee_id === req.user.employee_id`). Upaya mengubah pesan orang lain selalu ditolak server dengan HTTP `403 Forbidden`.
+5. **Aturan Pengelolaan Pesan & Penautan Akun User:**
+   - Pesan antar karyawan hanya dapat ditambahkan dan dihapus oleh Admin (`POST` & `DELETE /api/admin/messages`), tanpa fitur edit pesan (`PUT`/`PATCH`). Pengirim dan penerima wajib merupakan karyawan valid dan berbeda (`sender_employee_id <> recipient_employee_id`).
+   - Penautan akun `users` ke `employees` (`users.employee_id`) hanya dilakukan oleh Admin melalui `PUT /api/admin/users/:id`. Karena kolom `employee_id` bersifat `UNIQUE`, satu karyawan hanya dapat terhubung ke maksimal satu akun user (`409 Conflict` jika sudah terhubung ke user lain).
 
 ---
 
