@@ -1,0 +1,30 @@
+@import "tailwindcss";
+
+@theme {
+  --color-sky-halim: #8ECDF2;
+  --color-sky-halim-soft: #EBF7FE;
+  --color-scarlet-halim: #E32636;
+  --color-scarlet-halim-hover: #C81E2D;
+  --font-serif-halim: "Merriweather", Georgia, Cambria, "Times New Roman", serif;
+  --font-sans-halim: "Plus Jakarta Sans", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+@layer base {
+  html {
+    font-size: 16px;
+    font-family: var(--font-sans-halim);
+  }
+
+  body {
+    background-color: #ffffff;
+    color: #1e293b;
+    font-size: 1rem;
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
+
+  h1, h2, h3, .font-serif-heading {
+    font-family: var(--font-serif-halim);
+  }
+}
+

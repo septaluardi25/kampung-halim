@@ -7,6 +7,8 @@ dist/
 build/
 **/dist/
 **/build/
+*.tsbuildinfo
+**/*.tsbuildinfo
 
 # Environment & Credentials (NEVER COMMIT SECRETS)
 .env
