@@ -10,6 +10,10 @@ import {
 
 const app = express();
 
+if (env.NODE_ENV === 'production') {
+  app.set('trust proxy', 1);
+}
+
 app.use(helmet());
 app.use(
   cors({
@@ -25,4 +29,3 @@ app.use(notFoundHandler);
 app.use(globalErrorHandler);
 
 export default app;
-

@@ -1,4 +1,6 @@
 import { Router } from 'express';
+import { authenticate } from '../middleware/authenticate';
+import { authorizeAdmin } from '../middleware/authorize';
 import { adminEmployeeRouter } from './admin.employee.route';
 import { adminMemoryRouter } from './admin.memory.route';
 import { adminMessageRouter } from './admin.message.route';
@@ -17,7 +19,8 @@ router.use('/', employeeRoutes);
 router.use('/', memoryRoutes);
 router.use('/', messageRoutes);
 
-// Admin API Routes
+// Admin API Routes (Protected by authenticate & authorizeAdmin)
+router.use('/admin', authenticate, authorizeAdmin);
 router.use('/admin/employees', adminEmployeeRouter);
 router.use('/admin/memories', adminMemoryRouter);
 router.use('/admin/messages', adminMessageRouter);

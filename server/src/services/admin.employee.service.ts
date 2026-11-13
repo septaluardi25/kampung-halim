@@ -122,11 +122,15 @@ export async function updateAdminEmployee(
 export async function deleteAdminEmployee(id: number): Promise<{ id: number }> {
   const employee = await getAdminEmployeeById(id);
 
-  if (employee.photo_url) {
-    await deletePhotoFromBlob(employee.photo_url);
-  }
-
   await pool.query<ResultSetHeader>('DELETE FROM employees WHERE id = ?', [id]);
+
+  if (employee.photo_url) {
+    try {
+      await deletePhotoFromBlob(employee.photo_url);
+    } catch (err) {
+      console.error('[DeletePhotoBlob Warning]', err);
+    }
+  }
 
   return { id };
 }
@@ -162,12 +166,16 @@ export async function updateEmployeePhoto(
 export async function deleteEmployeePhoto(id: number): Promise<void> {
   const employee = await getAdminEmployeeById(id);
 
-  if (employee.photo_url) {
-    await deletePhotoFromBlob(employee.photo_url);
-  }
-
   await pool.query<ResultSetHeader>(
     'UPDATE employees SET photo_url = NULL WHERE id = ?',
     [id]
   );
+
+  if (employee.photo_url) {
+    try {
+      await deletePhotoFromBlob(employee.photo_url);
+    } catch (err) {
+      console.error('[DeletePhotoBlob Warning]', err);
+    }
+  }
 }

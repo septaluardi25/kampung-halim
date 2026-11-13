@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { getMemories, getMemoryById } from '../controllers/memory.controller';
-import { authenticate } from '../middleware/auth.middleware';
+import { authenticate } from '../middleware/authenticate';
 
 const router = Router();
 

@@ -11,7 +11,7 @@ import {
   listAdminUsers,
   updateAdminUser,
 } from '../services/admin.user.service';
-import { AdminServiceError } from '../utils/errors';
+import { handleServiceError } from '../utils/handleServiceError';
 import { sendError, sendSuccess } from '../utils/response';
 
 export async function listAdminUsersHandler(
@@ -23,11 +23,7 @@ export async function listAdminUsersHandler(
     const users = await listAdminUsers();
     sendSuccess(res, 200, users, 'Daftar user berhasil diambil');
   } catch (error) {
-    if (error instanceof AdminServiceError) {
-      sendError(res, error.statusCode, error.message);
-      return;
-    }
-    next(error);
+    handleServiceError(error, res, next);
   }
 }
 
@@ -46,11 +42,7 @@ export async function getAdminUserByIdHandler(
     const user = await getAdminUserById(parsedParams.data.id);
     sendSuccess(res, 200, user, 'Detail user berhasil diambil');
   } catch (error) {
-    if (error instanceof AdminServiceError) {
-      sendError(res, error.statusCode, error.message);
-      return;
-    }
-    next(error);
+    handleServiceError(error, res, next);
   }
 }
 
@@ -69,11 +61,7 @@ export async function createAdminUserHandler(
     const user = await createAdminUser(parsedBody.data);
     sendSuccess(res, 201, user, 'User berhasil dibuat');
   } catch (error) {
-    if (error instanceof AdminServiceError) {
-      sendError(res, error.statusCode, error.message);
-      return;
-    }
-    next(error);
+    handleServiceError(error, res, next);
   }
 }
 
@@ -104,11 +92,7 @@ export async function updateAdminUserHandler(
 
     sendSuccess(res, 200, user, 'User berhasil diperbarui');
   } catch (error) {
-    if (error instanceof AdminServiceError) {
-      sendError(res, error.statusCode, error.message);
-      return;
-    }
-    next(error);
+    handleServiceError(error, res, next);
   }
 }
 
@@ -129,10 +113,6 @@ export async function deleteAdminUserHandler(
 
     sendSuccess(res, 200, result, 'User berhasil dihapus');
   } catch (error) {
-    if (error instanceof AdminServiceError) {
-      sendError(res, error.statusCode, error.message);
-      return;
-    }
-    next(error);
+    handleServiceError(error, res, next);
   }
 }

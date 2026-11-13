@@ -55,7 +55,7 @@ export async function authenticate(
 
   let decoded: unknown;
   try {
-    decoded = jwt.verify(token, env.JWT_SECRET);
+    decoded = jwt.verify(token, env.JWT_SECRET, { algorithms: ['HS256'] });
   } catch {
     sendError(res, 401, 'Token autentikasi tidak valid atau telah kedaluwarsa');
     return;

@@ -113,7 +113,7 @@ export async function loginUser(input: LoginInput): Promise<LoginResult> {
       employee_id: user.employee_id,
     },
     env.JWT_SECRET,
-    { expiresIn: '1d' }
+    { expiresIn: '1d', algorithm: 'HS256' }
   );
 
   return {

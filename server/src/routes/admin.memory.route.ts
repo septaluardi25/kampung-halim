@@ -6,12 +6,8 @@ import {
   listAdminMemoriesHandler,
   updateAdminMemoryHandler,
 } from '../controllers/admin.memory.controller';
-import { authenticate } from '../middleware/authenticate';
-import { authorizeAdmin } from '../middleware/authorize';
 
 export const adminMemoryRouter = Router();
-
-adminMemoryRouter.use(authenticate, authorizeAdmin);
 
 adminMemoryRouter.get('/', listAdminMemoriesHandler);
 adminMemoryRouter.get('/:id', getAdminMemoryByIdHandler);

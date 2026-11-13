@@ -10,7 +10,7 @@ import {
   listAdminMemories,
   updateAdminMemory,
 } from '../services/admin.memory.service';
-import { AdminServiceError } from '../utils/errors';
+import { handleServiceError } from '../utils/handleServiceError';
 import { sendError, sendSuccess } from '../utils/response';
 
 export async function listAdminMemoriesHandler(
@@ -22,11 +22,7 @@ export async function listAdminMemoriesHandler(
     const memories = await listAdminMemories();
     sendSuccess(res, 200, memories, 'Daftar kenangan berhasil diambil');
   } catch (error) {
-    if (error instanceof AdminServiceError) {
-      sendError(res, error.statusCode, error.message);
-      return;
-    }
-    next(error);
+    handleServiceError(error, res, next);
   }
 }
 
@@ -45,11 +41,7 @@ export async function getAdminMemoryByIdHandler(
     const memory = await getAdminMemoryById(parsedParams.data.id);
     sendSuccess(res, 200, memory, 'Detail kenangan berhasil diambil');
   } catch (error) {
-    if (error instanceof AdminServiceError) {
-      sendError(res, error.statusCode, error.message);
-      return;
-    }
-    next(error);
+    handleServiceError(error, res, next);
   }
 }
 
@@ -68,11 +60,7 @@ export async function createAdminMemoryHandler(
     const memory = await createAdminMemory(parsedBody.data);
     sendSuccess(res, 201, memory, 'Kenangan berhasil ditambahkan');
   } catch (error) {
-    if (error instanceof AdminServiceError) {
-      sendError(res, error.statusCode, error.message);
-      return;
-    }
-    next(error);
+    handleServiceError(error, res, next);
   }
 }
 
@@ -97,11 +85,7 @@ export async function updateAdminMemoryHandler(
     const memory = await updateAdminMemory(parsedParams.data.id, parsedBody.data);
     sendSuccess(res, 200, memory, 'Kenangan berhasil diperbarui');
   } catch (error) {
-    if (error instanceof AdminServiceError) {
-      sendError(res, error.statusCode, error.message);
-      return;
-    }
-    next(error);
+    handleServiceError(error, res, next);
   }
 }
 
@@ -120,10 +104,6 @@ export async function deleteAdminMemoryHandler(
     const result = await deleteAdminMemory(parsedParams.data.id);
     sendSuccess(res, 200, result, 'Kenangan berhasil dihapus');
   } catch (error) {
-    if (error instanceof AdminServiceError) {
-      sendError(res, error.statusCode, error.message);
-      return;
-    }
-    next(error);
+    handleServiceError(error, res, next);
   }
 }

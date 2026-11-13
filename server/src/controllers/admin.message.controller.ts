@@ -8,7 +8,7 @@ import {
   deleteAdminMessage,
   listAdminMessages,
 } from '../services/admin.message.service';
-import { AdminServiceError } from '../utils/errors';
+import { handleServiceError } from '../utils/handleServiceError';
 import { sendError, sendSuccess } from '../utils/response';
 
 export async function listAdminMessagesHandler(
@@ -20,11 +20,7 @@ export async function listAdminMessagesHandler(
     const messages = await listAdminMessages();
     sendSuccess(res, 200, messages, 'Daftar pesan berhasil diambil');
   } catch (error) {
-    if (error instanceof AdminServiceError) {
-      sendError(res, error.statusCode, error.message);
-      return;
-    }
-    next(error);
+    handleServiceError(error, res, next);
   }
 }
 
@@ -43,11 +39,7 @@ export async function createAdminMessageHandler(
     const message = await createAdminMessage(parsedBody.data);
     sendSuccess(res, 201, message, 'Pesan berhasil ditambahkan');
   } catch (error) {
-    if (error instanceof AdminServiceError) {
-      sendError(res, error.statusCode, error.message);
-      return;
-    }
-    next(error);
+    handleServiceError(error, res, next);
   }
 }
 
@@ -66,10 +58,6 @@ export async function deleteAdminMessageHandler(
     const result = await deleteAdminMessage(parsedParams.data.id);
     sendSuccess(res, 200, result, 'Pesan berhasil dihapus');
   } catch (error) {
-    if (error instanceof AdminServiceError) {
-      sendError(res, error.statusCode, error.message);
-      return;
-    }
-    next(error);
+    handleServiceError(error, res, next);
   }
 }
