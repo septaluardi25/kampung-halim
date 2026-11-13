@@ -130,12 +130,12 @@ server/
 
 ## Rincian Checklist Pekerjaan
 
-- [ ] **1. Buat Helper Inisial Avatar (`src/utils/avatar.ts`)**
-- [ ] **2. Buat Middleware Autentikasi (`src/middleware/auth.middleware.ts`)**
-- [ ] **3. Buat Schema Validasi Zod Query Parameter (`src/schemas/employee.schema.ts`)**
-- [ ] **4. Buat Controller `getEmployees` (`src/controllers/employee.controller.ts`)**
-- [ ] **5. Buat Route `employee.route.ts` dan Daftarkan ke `src/routes/index.ts`**
-- [ ] **6. Verifikasi & Pengujian Endpoint (Manual & Security Testing)**
+- [x] **1. Buat Helper Inisial Avatar (`src/utils/avatar.ts`)**
+- [x] **2. Buat Middleware Autentikasi (`src/middleware/auth.middleware.ts`)**
+- [x] **3. Buat Schema Validasi Zod Query Parameter (`src/schemas/employee.schema.ts`)**
+- [x] **4. Buat Controller `getEmployees` (`src/controllers/employee.controller.ts`)**
+- [x] **5. Buat Route `employee.route.ts` dan Daftarkan ke `src/routes/index.ts`**
+- [x] **6. Verifikasi & Pengujian Endpoint (Manual & Security Testing)**
 
 ---
 
