@@ -9,3 +9,4 @@ export const employeeQuerySchema = z.object({
 });
 
 export type EmployeeQueryInput = z.infer<typeof employeeQuerySchema>;
+

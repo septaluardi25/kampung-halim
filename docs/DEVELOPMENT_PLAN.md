@@ -285,10 +285,12 @@ flowchart TD
 ### Tahap 2 — Login & Keamanan Backend
 
 #### `T-06` — Utilitas `bcryptjs`, JWT, Zod Auth Schema, & Rate Limiter
-- **Deskripsi:** Mengimplementasikan hash/verify `bcryptjs`, sign/verify JWT (`1d`), schema Zod untuk login, serta `express-rate-limit` (maksimal 5 percobaan/menit pada `/api/auth/login`).
+- **Deskripsi:** Mengimplementasikan hash/verify `bcryptjs`, sign/verify JWT (`1d`) dengan `JWT_SECRET`, schema Zod untuk login (`email` minimal 5 karakter & valid, `password` minimal 6 karakter), serta `express-rate-limit` (maksimal 5 percobaan/menit pada `/api/auth/login`).
 - **Dependency:** `T-02`
 - **Acceptance Criteria:**
-  - JWT memiliki expiry `1d` dan hanya ditandatangani dengan `JWT_SECRET`.
+  - JWT memiliki expiry `1d` dan hanya ditandatangani serta diverifikasi dengan `JWT_SECRET`.
+  - Schema Zod menolak email < 5 karakter / format salah, dan password < 6 karakter dengan pesan bahasa Indonesia yang ramah.
+  - Password di-crypt (hash) menggunakan `bcryptjs` (salt rounds: 10).
   - Percobaan login ke-6 dalam 1 menit ditolak dengan HTTP `429` dan pesan bahasa Indonesia.
 
 #### `T-07` — Endpoint `POST /api/auth/login`, `GET /api/auth/me`, & Middleware Pelindung
@@ -374,12 +376,12 @@ flowchart TD
   - Tidak ada route `PUT /api/admin/messages/:id`.
 
 #### `T-16` — API Admin Kelola Akun User (`/api/admin/users`)
-- **Deskripsi:** Implementasi `GET`, `POST`, `PUT`, `DELETE` akun user khusus `admin` dengan hash `bcryptjs` dan validasi email unik (`409`).
+- **Deskripsi:** Implementasi `GET`, `POST`, `PUT`, `DELETE` akun user khusus `admin` dengan hash `bcryptjs` (salt rounds: 10) dan validasi Zod (`name` min 5, `email` min 5 & format email valid, `password` min 6) serta validasi email unik (`409`).
 - **Dependency:** `T-07`
 - **Acceptance Criteria:**
   - `GET` tidak pernah mengembalikan `password_hash`.
-  - `POST` membuat user (`role = 'user'`) dengan password ter-hash; email duplikat ditolak `409`.
-  - `PUT` dapat mengubah data & status `is_active`; admin dicegah menonaktifkan/menghapus akun dirinya sendiri (`400`).
+  - `POST` membuat user (`role = 'user'`) dengan password di-crypt menggunakan `bcryptjs`; validasi Zod (`name` >= 5, `email` >= 5, `password` >= 6); email duplikat ditolak `409`.
+  - `PUT` dapat mengubah data (`name` min 5 jika diisi, `password` min 6 jika diisi & di-crypt) & status `is_active`; admin dicegah menonaktifkan/menghapus akun dirinya sendiri (`400`).
 
 #### `T-17` — Skrip CLI Reset Password Admin
 - **Deskripsi:** Skrip lokal di `server/src/db/` untuk memperbarui `password_hash` akun admin secara aman menggunakan `bcryptjs`.

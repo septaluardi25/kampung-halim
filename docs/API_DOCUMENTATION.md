@@ -74,10 +74,13 @@ Dokumen ini mendefinisikan kontrak REST API berdasarkan [PRD.md](file:///c:/User
     "password": "password123"
   }
   ```
+- **Validasi Input (Zod):**
+  - `email`: string, format email valid, minimal 5 karakter (`z.string().min(5).email()`).
+  - `password`: string, minimal 6 karakter (`z.string().min(6)`).
 - **Aturan:**
-  - Verifikasi password menggunakan `bcryptjs`.
-  - Jika `is_active = false`, tolak dengan `403 Forbidden`.
-  - Jika berhasil, buat JWT (`expiresIn: '1d'`) berisi `id` dan `role`.
+  - Password diverifikasi menggunakan `bcryptjs` (mencocokkan plaintext dengan hash bcrypt pada kolom `password_hash`).
+  - Jika `is_active = false` (0), tolak dengan `403 Forbidden`.
+  - Jika berhasil, buat JWT (`expiresIn: '1d'`) yang ditandatangani menggunakan `JWT_SECRET`, berisi payload `{ id, email, role, employee_id }`.
 - **Respons `200 OK`:**
   ```json
   {
@@ -387,11 +390,20 @@ Seluruh endpoint di bawah ini wajib melewati middleware `authenticate` dan `auth
 
 - **`GET /api/admin/users`**: Mengambil seluruh daftar akun user (tanpa `password_hash`).
 - **`POST /api/admin/users`**:
-  - **Body (Zod):** `{ "name": "...", "email": "...", "password": "minimal 8 karakter", "is_active": true }`.
-  - Server selalu menetapkan `role = 'user'` (atau validasi email unik -> `409 Conflict` jika duplikat) dan meng-hash password dengan `bcryptjs`.
+  - **Body (Zod):** `{ "name": "...", "email": "...", "password": "...", "is_active": true }`.
+  - **Validasi Input (Zod):**
+    - `name`: string, minimal 5 karakter (`z.string().trim().min(5)`).
+    - `email`: string, format email valid, minimal 5 karakter (`z.string().trim().min(5).email()`), wajib unik (jika sudah terdaftar tolak `409 Conflict`).
+    - `password`: string, minimal 6 karakter (`z.string().min(6)`).
+    - `is_active`: boolean (opsional, default `true`).
+  - Server selalu menetapkan `role = 'user'` dan wajib meng-crypt (hash) password menggunakan `bcryptjs` (salt rounds: 10) sebelum disimpan ke kolom `password_hash`.
   - **Respons `201 Created`:** Mengembalikan data akun baru tanpa `password_hash`.
 - **`PUT /api/admin/users/:id`**:
-  - **Body (Zod):** `{ "name": "...", "email": "...", "is_active": true, "password": "opsional min 8 karakter" }`.
+  - **Body (Zod):**
+    - `name`: opsional, minimal 5 karakter jika diisi.
+    - `email`: opsional, format email valid, minimal 5 karakter jika diisi.
+    - `is_active`: opsional, boolean.
+    - `password`: opsional, minimal 6 karakter jika diisi (wajib di-crypt dengan `bcryptjs` sebelum disimpan).
   - Digunakan untuk mengubah profil akun, mengganti status aktif (`is_active`), atau mengatur ulang password oleh admin. Admin dicegah menonaktifkan akun admin miliknya sendiri (`400`).
 - **`DELETE /api/admin/users/:id`**:
   - Menghapus akun user. Admin dicegah menghapus akun admin miliknya sendiri (`400`).

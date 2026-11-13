@@ -56,3 +56,4 @@ export async function getEmployees(req: Request, res: Response): Promise<void> {
     sendError(res, 500, 'Gagal mengambil daftar karyawan');
   }
 }
+
