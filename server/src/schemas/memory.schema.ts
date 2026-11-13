@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 export const memoryIdParamSchema = z.object({
   id: z.coerce
-    .number()
+    .number({ message: 'ID kenangan harus berupa angka' })
     .int('ID kenangan harus berupa bilangan bulat')
     .positive('ID kenangan harus lebih besar dari 0'),
 });
