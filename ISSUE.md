@@ -1,535 +1,350 @@
-# ISSUE #01 — Setup Backend Express + TypeScript, Konfigurasi Environment, Koneksi MySQL2 Pool, Database Schema, Seed Data, & Health Check
+# ISSUE #02 — Implementasi Endpoint `GET /api/employees` (Daftar Karyawan, Live Search & Proteksi Autentikasi)
 
 - **Proyek:** Warga Halim (`warga-halim`)
-- **Target Branch:** `main`
-- **Target Pembaca:** Junior Fullstack Developer & AI Coding Assistant
-- **Status:** `Open` (Tahap 1 — Fondasi Backend & Database)
+- **Target Branch:** `features/users`
+- **Target Pembaca:** Junior Fullstack Developer & AI Coding Model
+- **Status:** `Open` (Tahap 3 — API Data Login)
 - **Dokumen Referensi Wajib:**
-  - [docs/PRD.md](./docs/PRD.md)
-  - [docs/DATABASE_DESIGN.md](./docs/DATABASE_DESIGN.md)
-  - [docs/API_DOCUMENTATION.md](./docs/API_DOCUMENTATION.md)
-  - [docs/DEVELOPMENT_PLAN.md](./docs/DEVELOPMENT_PLAN.md)
-  - [docs/TEST_PLAN.md](./docs/TEST_PLAN.md)
+  - [docs/PRD.md](./docs/PRD.md) — Bagian F2 (Karyawan dan Biodata) & Bagian 9 (Technical Requirements)
+  - [docs/API_DOCUMENTATION.md](./docs/API_DOCUMENTATION.md) — Bagian 3.2 (`GET /api/employees`)
+  - [docs/DATABASE_DESIGN.md](./docs/DATABASE_DESIGN.md) — Bagian 3.2 (Tabel `employees`)
+  - [docs/DEVELOPMENT_PLAN.md](./docs/DEVELOPMENT_PLAN.md) — Task `T-09`
+  - [docs/TEST_PLAN.md](./docs/TEST_PLAN.md) — `TC-F2-01`, `TC-F2-02`, `TC-F2-03`, `TC-SPEC-07`, `TC-SPEC-08`
 
 ---
 
-## Ringkasan Tujuan
+## Ringkasan Tugas
 
-Membangun fondasi backend API **Warga Halim** di dalam folder `server/` menggunakan **Express + TypeScript (strict)**, **validasi environment dengan Zod**, **koneksi pool `mysql2/promise`**, **5 tabel database MySQL**, **data seed awal dengan hash bcrypt**, serta endpoint **`GET /api/health`** untuk memastikan server dan database siap digunakan sebelum fitur autentikasi dan CRUD dikerjakan.
+Buat endpoint **`GET /api/employees`** untuk mengambil daftar ringkasan karyawan yang telah diterbitkan (`status = 'published'`). Endpoint ini digunakan oleh halaman front-end `/karyawan` untuk menampilkan grid kartu karyawan dan mendukung **pencarian nama langsung (live search)** melalui query parameter `?search=`.
 
-> **Penting:** Kerjakan **hanya** ruang lingkup di Issue ini terlebih dahulu. Jangan membuat endpoint login, CRUD karyawan/kenangan/pesan, atau aplikasi frontend sebelum seluruh checklist di bawah lulus verifikasi.
+Contoh pemanggilan pencarian:
+```http
+GET /api/employees?search=andi
+```
 
 ---
 
-## Aturan Emas (Guardrails Wajib untuk Junior Dev & AI Model)
+## Aturan Emas & Guardrails Wajib (PENTING DIBACA SEBELUM CODING)
 
-Baca dan patuhi semua aturan ini tanpa pengecualian:
+Junior programmer dan model AI **wajib** mengikuti aturan-aturan berikut:
 
-1. **KEAMANAN KREDENSIAL (ZERO LEAK):**
-   - **DILARANG KERAS** meng-commit file `.env`, password database asli, `JWT_SECRET` produksi, atau `BLOB_READ_WRITE_TOKEN` ke Git.
-   - Selalu periksa `.gitignore` di root repo sebelum menjalankan `git add`. Yang boleh masuk ke Git hanyalah `.env.example` dengan nilai placeholder kosong/dummy.
-   - **DILARANG** menampilkan detail kredensial, password, atau stack trace mentah pada respons JSON error API maupun log produksi.
-2. **TYPESCRIPT STRICT (TANPA `any`):**
-   - `tsconfig.json` wajib mengaktifkan `"strict": true` dan `"noImplicitAny": true`.
-   - **DILARANG** memakai tipe `any`. Gunakan tipe eksplisit, `unknown` (lalu validasi dengan Zod), atau tipe dari `@types/express` & `mysql2`.
-3. **SERVERLESS-READY MYSQL POOL:**
-   - Target deploy produksi adalah **Vercel Serverless** + MySQL eksternal (Railway / Aiven / TiDB Cloud).
-   - **WAJIB** menggunakan `mysql2/promise` dengan **connection pool kecil (`connectionLimit: 5`)**. Jangan membuat koneksi tunggal (`createConnection`) yang membuka-tutup koneksi berulang tanpa pool atau pool besar yang menghabiskan kuota koneksi database eksternal.
-   - **WAJIB** memakai parameterized query (`?`) untuk seluruh query SQL agar kebal SQL Injection.
-4. **PISAHKAN `app.ts` DAN `server.ts`:**
-   - `server/src/app.ts` hanya membuat, mengonfigurasi, dan mengekspor instance Express (`export default app`) **tanpa memanggil `app.listen()`** (kebutuhan Vercel Serverless Function).
-   - `server/src/server.ts` bertugas memanggil `app.listen()` untuk dijalankan di komputer lokal.
-5. **FORMAT RESPONS API SERAGAM:**
-   - Seluruh endpoint API (sukses maupun error) **WAJIB** mengembalikan struktur JSON:
+1. **HAK AKSES WAJIB LOGIN (`401 UNAUTHORIZED`):**
+   - Halaman daftar karyawan dan endpoint `GET /api/employees` **BUKAN ENDPOINT PUBLIK**.
+   - Pengunjung tanpa login yang memanggil endpoint ini **WAJIB DITOLAK** dengan HTTP `401 Unauthorized` dan pesan bahasa Indonesia: `"Akses ditolak. Token autentikasi tidak ditemukan"`.
+   - Hanya user atau admin yang login dengan token JWT sah dan berstatus aktif (`is_active = 1`) yang diizinkan mengambil data. Akun nonaktif wajib ditolak dengan HTTP `403 Forbidden`.
+
+2. **HANYA DATA TERBIT (`status = 'published'`):**
+   - Karyawan berstatus `draft` **TIDAK BOLEH** muncul pada endpoint ini.
+   - Status `draft` hanya boleh dikelola oleh admin di modul Panel Admin (`/api/admin/employees`).
+
+3. **PROTEKSI DATA PRIBADI (KARTU RINGKAS SAJA):**
+   - Sesuai aturan khusus Warga Halim: *"User melihat daftar karyawan: Biodata lengkap hanya melalui endpoint detail yang terlindungi"*.
+   - Endpoint `GET /api/employees` **HANYA MENGEMBALIKAN DATA KARTU RINGKAS**:
+     - `id`: number
+     - `full_name`: string
+     - `nickname`: string
+     - `photo_url`: string | null
+     - `initials`: string (dihitung otomatis dari nama)
+   - **DILARANG MENGEMBALIKAN KOLOM BIODATA LENGKAP** seperti `hometown`, `hobby`, `contact`, `favorite_quote`, riwayat kenangan, maupun pesan pada endpoint list ini. Biodata lengkap hanya boleh diakses melalui endpoint detail `GET /api/employees/:id`.
+
+4. **KOLOM `position` / JABATAN SUDAH DIHAPUS PERMANEN:**
+   - **JANGAN PERNAH** menambahkan, menyeleksi (`SELECT position ...`), atau mengembalikan field `position`, `division`, `year_joined`, atau `year_left`.
+   - Seluruh kolom tersebut telah resmi dihapus dari skema database dan dokumentasi Warga Halim.
+
+5. **ANTI SQL INJECTION (WAJIB PARAMETERIZED QUERY `?`):**
+   - Query pencarian nama **WAJIB** menggunakan placeholder `?` dari library `mysql2/promise`.
+   - **DILARANG KERAS** melakukan penggabungan string (string interpolation/concatenation) seperti:
+     ```typescript
+     // SALAH BESAR (RENTAN SQL INJECTION):
+     `SELECT ... WHERE full_name LIKE '%${search}%'`
+     ```
+   - **BENTUK YANG BENAR:**
+     ```typescript
+     // BENAR & AMAN:
+     const query = `
+       SELECT id, full_name, nickname, photo_url
+       FROM employees
+       WHERE status = 'published' AND (full_name LIKE ? OR nickname LIKE ?)
+       ORDER BY full_name ASC
+     `;
+     const searchPattern = `%${search}%`;
+     const [rows] = await pool.query(query, [searchPattern, searchPattern]);
+     ```
+
+6. **FORMAT RESPONS API STANDAR:**
+   - Wajib mengikuti format seragam Warga Halim:
      ```json
      {
        "success": true,
-       "data": {},
-       "message": "Pesan bahasa Indonesia yang jelas"
+       "data": [
+         {
+           "id": 1,
+           "full_name": "Andi Budi Santoso",
+           "nickname": "Andi",
+           "photo_url": "https://xxx.public.blob.vercel-storage.com/employees/1.jpg",
+           "initials": "AB"
+         }
+       ],
+       "message": "Daftar karyawan berhasil diambil"
      }
      ```
-6. **KESESUAIAN SCHEMA & RULE DOMAIN:**
-   - Hanya ada **5 tabel**: `employees`, `users`, `memories`, `memory_employees`, `messages`. Jangan menambah tabel di luar PRD (misalnya `company_profile`).
-   - Pada tabel `employees`, **DILARANG** menambahkan kolom `position`, `division`, `year_joined`, atau `year_left`.
-   - **DILARANG** membuat endpoint registrasi publik (`POST /api/auth/register`). Akun `admin` hanya berasal dari `seed.sql` dengan `bcryptjs`.
+
+7. **KEAMANAN KREDENSIAL (ZERO CREDENTIAL LEAK):**
+   - File `.env` lokal tidak boleh di-push ke Git (sudah diblokir oleh `.gitignore`).
+   - Jangan menuliskan password database, `JWT_SECRET`, atau token apa pun di dalam kode sumber. Selalu impor konfigurasi dari `src/config/env.ts`.
 
 ---
 
-## Struktur Folder Aplikasi (Kecil, Rapi, & Profesional)
+## Struktur Folder Arsitektur Fitur
 
-Aplikasi Warga Halim berskala kecil-menengah, sehingga kita menggunakan **Layered Modular Structure** yang ringan namun profesional — jelas pemisahan tanggung jawabnya tanpa *over-engineering* (tidak perlu ORM berat seperti Prisma/TypeORM, tidak perlu CQRS atau *repository-factory* berlapis-lapis).
+Untuk menjaga aplikasi tetap kecil, rapi, dan modular, letakkan kode pada struktur folder berikut:
 
 ```text
-warga-halim/                       # Root monorepo
-├── .gitignore                     # Wajib memblokir .env, node_modules, dist, log, dll.
-├── ISSUE.md                       # Dokumen tugas ini
-├── docs/                          # Spesifikasi PRD, DB, API, Development Plan, Test Plan
-├── client/                        # (Tahap berikutnya) Frontend React 19 + Vite + TypeScript
-└── server/                        # Backend Express + TypeScript (FOKUS ISSUE INI)
-    ├── .env                       # LOKAL SAJA - rahasia asli (TIDAK BOLEH masuk Git)
-    ├── .env.example               # Template env aman untuk dibagikan (WAJIB masuk Git)
-    ├── package.json               # Dependensi dan script server
-    ├── tsconfig.json              # Konfigurasi TypeScript strict
-    ├── vercel.json                # Konfigurasi routing Vercel Serverless ke src/app.ts
-    └── src/
-        ├── config/
-        │   └── env.ts             # Load dotenv + validasi ketat seluruh env var dengan Zod
-        ├── db/
-        │   ├── pool.ts            # Koneksi MySQL2 connection pool + helper cek koneksi
-        │   ├── schema.sql         # DDL 5 tabel utama (InnoDB, utf8mb4) - SUDAH TERSEDIA
-        │   └── seed.sql           # Data contoh + 1 admin bcrypt - SUDAH TERSEDIA
-        ├── utils/
-        │   └── response.ts        # Helper standardisasi JSON { success, data, message }
-        ├── middleware/
-        │   └── error.middleware.ts# Handler 404 Not Found & Global Error Handler
-        ├── controllers/
-        │   └── health.controller.ts # Logika endpoint GET /api/health (SELECT 1 ke DB)
-        ├── routes/
-        │   ├── health.route.ts    # Definisi route GET /health
-        │   └── index.ts           # Pengumpul semua route di bawah prefix /api
-        ├── app.ts                 # Inisialisasi Express + security middleware + routes (tanpa listen)
-        └── server.ts              # Entry point lokal: validasi env, cek DB, jalankan app.listen()
+server/
+├── src/
+│   ├── config/
+│   │   └── env.ts                      # Konfigurasi environment tervalidasi (Zod)
+│   ├── db/
+│   │   ├── pool.ts                     # Koneksi MySQL2 connection pool
+│   │   ├── schema.sql                  # DDL 5 tabel (referensi kolom employees)
+│   │   └── seed.sql                    # Data seed karyawan contoh
+│   ├── utils/
+│   │   ├── response.ts                 # Helper sendSuccess dan sendError
+│   │   └── avatar.ts                   # [BARU] Helper pembuat avatar inisial nama
+│   ├── middleware/
+│   │   ├── auth.middleware.ts          # [BARU] Middleware verifikasi JWT & akun aktif
+│   │   └── error.middleware.ts         # Handler 404 & global server error
+│   ├── schemas/
+│   │   └── employee.schema.ts          # [BARU] Validasi Zod untuk query parameter ?search=
+│   ├── controllers/
+│   │   └── employee.controller.ts      # [BARU] Logika query database & mapping data
+│   ├── routes/
+│   │   ├── employee.route.ts           # [BARU] Route GET /employees terproteksi auth
+│   │   ├── health.route.ts             # Route GET /health
+│   │   └── index.ts                    # Mendaftarkan router ke prefix /api
+│   ├── app.ts                          # Express instance
+│   └── server.ts                       # Entry point server lokal
 ```
-
-### Mengapa struktur ini dipilih?
-- **`config/env.ts`**: Menjamin aplikasi langsung gagal dengan pesan jelas saat startup (*fail-fast*) jika ada variabel `.env` yang lupa diisi, daripada error misterius di tengah runtime.
-- **`utils/response.ts`**: Menghindari duplikasi format respons di setiap controller.
-- **`routes/` + `controllers/`**: Memisahkan pemetaan URL (`routes`) dari logika bisnis/query (`controllers`) agar mudah diuji dan dikembangkan pada Issue selanjutnya.
-- **`app.ts` vs `server.ts`**: Memenuhi syarat deploy Vercel Serverless tanpa mengganggu kenyamanan development lokal (`tsx watch`).
 
 ---
 
-## Checklist Pekerjaan Utama
+## Rincian Checklist Pekerjaan
 
-- [ ] **1. Setup Express + TypeScript (Inisialisasi Backend Project)**
-- [ ] **2. Environment Configuration (Setup `.env`, `.env.example`, dan Validasi Environment)**
-- [ ] **3. MySQL Connection (Membuat Koneksi Menggunakan `mysql2` Connection Pool)**
-- [ ] **4. Database Schema (Membuat Lima Tabel Sesuai `DATABASE_DESIGN.md`)**
-- [ ] **5. Seed Data (Membuat Data Awal dan Satu Akun Admin dengan Bcrypt Hash)**
-- [ ] **6. Health Check (Endpoint `GET /api/health` Verifikasi Server & Database)**
+- [ ] **1. Buat Helper Inisial Avatar (`src/utils/avatar.ts`)**
+- [ ] **2. Buat Middleware Autentikasi (`src/middleware/auth.middleware.ts`)**
+- [ ] **3. Buat Schema Validasi Zod Query Parameter (`src/schemas/employee.schema.ts`)**
+- [ ] **4. Buat Controller `getEmployees` (`src/controllers/employee.controller.ts`)**
+- [ ] **5. Buat Route `employee.route.ts` dan Daftarkan ke `src/routes/index.ts`**
+- [ ] **6. Verifikasi & Pengujian Endpoint (Manual & Security Testing)**
 
 ---
 
-## Panduan Implementasi Detail Per Checklist
+## Panduan Implementasi Kode (Blueprint)
 
-### [ ] 1. Setup Express + TypeScript (Inisialisasi Backend Project)
+### 1. Helper Inisial Avatar (`server/src/utils/avatar.ts`)
 
-#### Langkah 1.1 — Inisialisasi & Instalasi Dependensi
-Masuk ke folder `server/` lalu inisialisasi `package.json` dan pasang paket yang dibutuhkan:
+Avatar inisial digunakan front-end ketika karyawan belum memiliki `photo_url`, atau sebagai teks alternatif.
 
-```bash
-cd server
-npm init -y
-
-# Dependensi produksi
-npm install express mysql2 dotenv zod cors helmet express-rate-limit bcryptjs jsonwebtoken
-
-# Dependensi development & TypeScript
-npm install -D typescript tsx @types/node @types/express @types/cors @types/bcryptjs @types/jsonwebtoken
-```
-
-> **Catatan:** Paket `bcryptjs`, `jsonwebtoken`, dan `express-rate-limit` ikut dipasang sekarang sebagai fondasi dependensi backend standar Warga Halim agar siap dipakai di Issue Auth berikutnya, namun **jangan membuat route auth** di Issue ini.
-
-#### Langkah 1.2 — Konfigurasi `server/package.json`
-Pastikan bagian `main` dan `scripts` di `server/package.json` menggunakan bentuk berikut:
-
-```json
-{
-  "name": "warga-halim-server",
-  "version": "1.0.0",
-  "private": true,
-  "description": "Backend API Warga Halim (Express + TypeScript + MySQL2)",
-  "main": "dist/server.js",
-  "scripts": {
-    "dev": "tsx watch src/server.ts",
-    "build": "tsc",
-    "start": "node dist/server.js",
-    "typecheck": "tsc --noEmit"
+```typescript
+/**
+ * Menghasilkan inisial nama 1-2 karakter kapital.
+ * Contoh:
+ * - "Andi Budi Santoso" -> "AB"
+ * - "Nadya" -> "N"
+ * - "M Dimas Septaluardi" -> "MD"
+ */
+export function generateInitials(fullName: string): string {
+  if (!fullName || typeof fullName !== 'string') {
+    return 'WH';
   }
+
+  const parts = fullName.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) {
+    return 'WH';
+  }
+
+  if (parts.length === 1) {
+    return parts[0].substring(0, Math.min(2, parts[0].length)).toUpperCase();
+  }
+
+  const firstChar = parts[0].charAt(0);
+  const secondChar = parts[1].charAt(0);
+  return (firstChar + secondChar).toUpperCase();
 }
 ```
 
-#### Langkah 1.3 — Konfigurasi `server/tsconfig.json`
-Buat `server/tsconfig.json` dengan mode `strict` penuh:
+---
 
-```json
-{
-  "compilerOptions": {
-    "target": "ES2022",
-    "module": "CommonJS",
-    "moduleResolution": "Node",
-    "rootDir": "./src",
-    "outDir": "./dist",
-    "strict": true,
-    "noImplicitAny": true,
-    "strictNullChecks": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true,
-    "skipLibCheck": true,
-    "resolveJsonModule": true
-  },
-  "include": ["src/**/*.ts"],
-  "exclude": ["node_modules", "dist"]
-}
-```
+### 2. Middleware Autentikasi (`server/src/middleware/auth.middleware.ts`)
 
-#### Langkah 1.4 — Helper Respons (`server/src/utils/response.ts`)
-Buat helper untuk menjaga format respons selalu konsisten `{ success, data, message }`:
+Endpoint `/api/employees` mewajibkan login. Middleware ini memverifikasi JWT dan memastikan status akun `is_active = 1`.
 
 ```typescript
-import type { Response } from 'express';
-
-export interface ApiResponse<T> {
-  success: boolean;
-  data: T | null;
-  message: string;
-}
-
-export function sendSuccess<T>(
-  res: Response,
-  statusCode: number,
-  data: T,
-  message: string
-): Response<ApiResponse<T>> {
-  return res.status(statusCode).json({
-    success: true,
-    data,
-    message,
-  });
-}
-
-export function sendError(
-  res: Response,
-  statusCode: number,
-  message: string,
-  data: unknown = null
-): Response<ApiResponse<unknown>> {
-  return res.status(statusCode).json({
-    success: false,
-    data,
-    message,
-  });
-}
-```
-
-#### Langkah 1.5 — Error & 404 Middleware (`server/src/middleware/error.middleware.ts`)
-Buat penangan route tidak ditemukan dan global error handler bahasa Indonesia:
-
-```typescript
-import type { NextFunction, Request, Response } from 'express';
+import type { Request, Response, NextFunction } from 'express';
+import jwt from 'jsonwebtoken';
+import { env } from '../config/env';
+import { pool } from '../db/pool';
 import { sendError } from '../utils/response';
+import type { RowDataPacket } from 'mysql2';
 
-export function notFoundHandler(_req: Request, res: Response): void {
-  sendError(res, 404, 'Endpoint tidak ditemukan');
+export interface AuthenticatedUserPayload {
+  id: number;
+  email: string;
+  role: 'admin' | 'user';
+  employee_id: number | null;
 }
 
-export function globalErrorHandler(
-  err: Error,
-  _req: Request,
+// Menambahkan user ke tipe Request Express
+declare global {
+  namespace Express {
+    interface Request {
+      user?: AuthenticatedUserPayload;
+    }
+  }
+}
+
+export async function authenticate(
+  req: Request,
   res: Response,
-  _next: NextFunction
-): void {
-  const isProduction = process.env.NODE_ENV === 'production';
+  next: NextFunction
+): Promise<void> {
+  const authHeader = req.headers.authorization;
 
-  if (!isProduction) {
-    console.error('[Server Error]', err);
-  } else {
-    console.error('[Server Error]', err.message);
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    sendError(res, 401, 'Akses ditolak. Token autentikasi tidak ditemukan');
+    return;
   }
 
-  sendError(res, 500, 'Terjadi kesalahan pada server');
-}
-```
+  const token = authHeader.split(' ')[1];
 
-#### Langkah 1.6 — Express App (`server/src/app.ts`), Local Entry (`server/src/server.ts`), dan `server/vercel.json`
-
-**`server/src/app.ts`** (tidak memanggil `app.listen`):
-```typescript
-import express from 'express';
-import cors from 'cors';
-import helmet from 'helmet';
-import { env } from './config/env';
-import apiRoutes from './routes';
-import {
-  globalErrorHandler,
-  notFoundHandler,
-} from './middleware/error.middleware';
-
-const app = express();
-
-app.use(helmet());
-app.use(
-  cors({
-    origin: env.CLIENT_URL,
-    credentials: true,
-  })
-);
-app.use(express.json({ limit: '1mb' }));
-
-app.use('/api', apiRoutes);
-
-app.use(notFoundHandler);
-app.use(globalErrorHandler);
-
-export default app;
-```
-
-**`server/src/server.ts`** (entry point lokal):
-```typescript
-import app from './app';
-import { env } from './config/env';
-import { checkDatabaseConnection } from './db/pool';
-
-async function startServer(): Promise<void> {
   try {
-    await checkDatabaseConnection();
-    console.log('[DB] Koneksi pool MySQL berhasil diverifikasi.');
+    const decoded = jwt.verify(token, env.JWT_SECRET) as AuthenticatedUserPayload;
 
-    app.listen(env.PORT, () => {
-      console.log(`[Server] Berjalan di http://localhost:${env.PORT}`);
-    });
+    // Verifikasi bahwa user masih aktif di database
+    const [rows] = await pool.query<RowDataPacket[]>(
+      'SELECT id, role, employee_id, is_active FROM users WHERE id = ? LIMIT 1',
+      [decoded.id]
+    );
+
+    if (rows.length === 0 || rows[0].is_active !== 1) {
+      sendError(res, 403, 'Akses ditolak. Akun Anda telah dinonaktifkan atau tidak ditemukan');
+      return;
+    }
+
+    req.user = {
+      id: rows[0].id,
+      email: decoded.email,
+      role: rows[0].role,
+      employee_id: rows[0].employee_id,
+    };
+
+    next();
   } catch (error) {
-    console.error('[Startup Error] Gagal menyalakan server:', error);
-    process.exit(1);
+    sendError(res, 401, 'Token autentikasi tidak valid atau telah kedaluwarsa');
   }
-}
-
-void startServer();
-```
-
-**`server/vercel.json`** (routing serverless Vercel):
-```json
-{
-  "version": 2,
-  "builds": [
-    {
-      "src": "src/app.ts",
-      "use": "@vercel/node"
-    }
-  ],
-  "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "src/app.ts"
-    }
-  ]
 }
 ```
 
 ---
 
-### [ ] 2. Environment Configuration (Setup `.env`, `.env.example`, dan Validasi Environment)
+### 3. Schema Validasi Query Pencarian (`server/src/schemas/employee.schema.ts`)
 
-#### Langkah 2.1 — Buat `server/.env.example` (Aman di-commit ke Git)
-File ini menjadi dokumentasi variabel wajib bagi developer lain tanpa membocorkan rahasia apa pun:
-
-```dotenv
-# Konfigurasi Server
-PORT=5000
-NODE_ENV=development
-
-# Konfigurasi Database MySQL
-DB_HOST=localhost
-DB_PORT=3306
-DB_USER=root
-DB_PASSWORD=
-DB_NAME=warga_halim
-
-# Keamanan & Autentikasi
-# Gunakan string acak minimal 32 karakter untuk produksi
-JWT_SECRET=ganti_dengan_secret_panjang_minimal_32_karakter
-
-# Frontend Origin (CORS)
-CLIENT_URL=http://localhost:5173
-
-# Vercel Blob (Upload Foto Karyawan - diisi saat fitur upload/deploy)
-BLOB_READ_WRITE_TOKEN=
-```
-
-#### Langkah 2.2 — Buat `server/.env` (Lokal Saja, DILARANG Masuk Git)
-Salin `.env.example` menjadi `server/.env` dan sesuaikan dengan kredensial MySQL lokal Anda:
-
-```bash
-cp server/.env.example server/.env
-```
-Verifikasi dengan `git status` bahwa `server/.env` **tidak muncul** sebagai *untracked file* (sudah terblokir oleh `.gitignore` di root).
-
-#### Langkah 2.3 — Validasi Environment dengan Zod (`server/src/config/env.ts`)
-Buat modul validasi `env.ts` agar seluruh tipe environment terjamin valid saat aplikasi mulai berjalan:
+Validasi input parameter `?search=` agar aman dan tidak membebani database:
 
 ```typescript
-import dotenv from 'dotenv';
 import { z } from 'zod';
 
-dotenv.config();
-
-const envSchema = z.object({
-  NODE_ENV: z
-    .enum(['development', 'production', 'test'])
-    .default('development'),
-  PORT: z.coerce.number().int().positive().default(5000),
-  DB_HOST: z.string().min(1, 'DB_HOST wajib diisi'),
-  DB_PORT: z.coerce.number().int().positive().default(3306),
-  DB_USER: z.string().min(1, 'DB_USER wajib diisi'),
-  DB_PASSWORD: z.string().default(''),
-  DB_NAME: z.string().min(1, 'DB_NAME wajib diisi'),
-  JWT_SECRET: z
+export const employeeQuerySchema = z.object({
+  search: z
     .string()
-    .min(16, 'JWT_SECRET wajib diisi minimal 16 karakter'),
-  CLIENT_URL: z
-    .string()
-    .url('CLIENT_URL harus berupa URL valid (contoh: http://localhost:5173)')
-    .default('http://localhost:5173'),
-  BLOB_READ_WRITE_TOKEN: z.string().optional().default(''),
+    .trim()
+    .max(100, 'Kata kunci pencarian maksimal 100 karakter')
+    .optional(),
 });
 
-const parsed = envSchema.safeParse(process.env);
-
-if (!parsed.success) {
-  console.error('[Env Error] Konfigurasi environment tidak valid:');
-  for (const issue of parsed.error.issues) {
-    console.error(`  - ${issue.path.join('.')}: ${issue.message}`);
-  }
-  process.exit(1);
-}
-
-export const env = parsed.data;
+export type EmployeeQueryInput = z.infer<typeof employeeQuerySchema>;
 ```
 
 ---
 
-### [ ] 3. MySQL Connection (Membuat Koneksi Menggunakan `mysql2` Connection Pool)
+### 4. Controller Daftar Karyawan (`server/src/controllers/employee.controller.ts`)
 
-Buat file `server/src/db/pool.ts`:
+Mengambil daftar karyawan berstatus `published` dengan parameterized query SQL yang aman:
 
-```typescript
-import mysql from 'mysql2/promise';
-import { env } from '../config/env';
-
-export const pool = mysql.createPool({
-  host: env.DB_HOST,
-  port: env.DB_PORT,
-  user: env.DB_USER,
-  password: env.DB_PASSWORD,
-  database: env.DB_NAME,
-  charset: 'utf8mb4',
-  waitForConnections: true,
-  connectionLimit: 5,
-  queueLimit: 0,
-  enableKeepAlive: true,
-  keepAliveInitialDelay: 0,
-});
-
-export async function checkDatabaseConnection(): Promise<void> {
-  const connection = await pool.getConnection();
-  try {
-    await connection.query('SELECT 1');
-  } finally {
-    connection.release();
-  }
-}
-```
-
-**Detail Penting:**
-1. Selalu gunakan `connection.release()` di dalam blok `finally` (atau gunakan `pool.query(...)` / `pool.execute(...)` langsung untuk query tunggal) agar koneksi tidak pernah bocor (*connection leak*).
-2. `connectionLimit: 5` sengaja dijaga kecil agar aman saat berjalan di lingkungan Vercel Serverless.
-
----
-
-### [ ] 4. Database Schema (Membuat Lima Tabel Sesuai `DATABASE_DESIGN.md`)
-
-File DDL sudah disiapkan di [server/src/db/schema.sql](./server/src/db/schema.sql) dan telah disinkronkan 100% dengan [docs/DATABASE_DESIGN.md](./docs/DATABASE_DESIGN.md). Tugas pada langkah ini adalah memastikan schema dijalankan pada database MySQL target dan memverifikasi kelima tabel beserta relasi dan index-nya:
-
-1. **`employees`** — `id`, `full_name` (INDEXED), `nickname`, `hometown`, `hobby`, `contact`, `favorite_quote`, `photo_url`, `status` (`draft` | `published`, INDEXED), `created_at`, `updated_at`. *(Tanpa kolom `position`, `division`, `year_joined`, `year_left`)*.
-2. **`users`** — `id`, `name`, `email` (UNIQUE), `password_hash`, `role` (`admin` | `user`), `employee_id` (`NULL`, `UNIQUE`, FK ke `employees(id)` dengan `ON DELETE SET NULL ON UPDATE CASCADE`), `is_active`, `created_at`, `updated_at`.
-3. **`memories`** — `id`, `title`, `event_date` (INDEXED), `story`, `status` (`draft` | `published`), `created_at`, `updated_at`.
-4. **`memory_employees`** — Pivot many-to-many `(memory_id, employee_id)` composite PK, `ON DELETE CASCADE` ke `memories` dan `employees`, `created_at` (tanpa `updated_at`).
-5. **`messages`** — `id`, `sender_employee_id`, `recipient_employee_id` (keduanya `ON DELETE CASCADE` ke `employees`), `message`, `impression`, `created_at`, `updated_at`.
-
-#### Cara Menjalankan Schema di MySQL Lokal:
-```sql
-CREATE DATABASE IF NOT EXISTS warga_halim
-  CHARACTER SET utf8mb4
-  COLLATE utf8mb4_unicode_ci;
-```
-Kemudian eksekusi `schema.sql`:
-```bash
-mysql -u root -p warga_halim < server/src/db/schema.sql
-```
-*(Di PowerShell Windows, gunakan `Get-Content server/src/db/schema.sql | mysql -u root -p warga_halim` atau jalankan lewat MySQL Workbench / DBeaver).*
-
----
-
-### [ ] 5. Seed Data (Membuat Data Awal dan Satu Akun Admin dengan Bcrypt Hash)
-
-File seed sudah disiapkan di [server/src/db/seed.sql](./server/src/db/seed.sql). Pastikan hal-hal berikut terpenuhi saat dijalankan:
-
-1. **Akun Admin Tunggal:** Dibuat dari `seed.sql` dengan `email = 'admin@wargahalim.id'`, `role = 'admin'`, `employee_id = NULL`, dan `password_hash` berbentuk hash `bcryptjs` valid (`$2a$10$...`). **Tidak ada password plaintext.**
-2. **Data Contoh Lengkap:**
-   - 5 data `employees` (`id` 1–4 berstatus `published`, `id` 5 berstatus `draft`).
-   - 4 contoh akun `users`: 3 user sudah tertaut ke karyawan (`employee_id` 1, 2, 3) dan 1 user **belum tertaut** (`employee_id = NULL`) untuk keperluan uji skenario khusus pada `TEST_PLAN.md`.
-   - 4 contoh `memories` (3 `published`, 1 `draft`) dan tag `memory_employees`.
-   - 4 contoh `messages` antar karyawan.
-
-#### Cara Menjalankan Seed Data:
-```bash
-mysql -u root -p warga_halim < server/src/db/seed.sql
-```
-
-*(Opsional untuk development lokal):* Jika ingin mengganti hash contoh pada `seed.sql` agar Anda tahu password lokal yang pasti bisa dipakai login nanti, generate hash bcrypt melalui Node CLI **tanpa menyimpannya sebagai plaintext di repo**:
-```bash
-node -e "const bcrypt = require('bcryptjs'); console.log(bcrypt.hashSync('PasswordLokalAnda123!', 10));"
-```
-
----
-
-### [ ] 6. Health Check (`GET /api/health`)
-
-Buat controller dan route untuk memeriksa bahwa Express dan koneksi pool MySQL benar-benar hidup:
-
-#### `server/src/controllers/health.controller.ts`
 ```typescript
 import type { Request, Response } from 'express';
-import { checkDatabaseConnection } from '../db/pool';
+import type { RowDataPacket } from 'mysql2';
+import { pool } from '../db/pool';
+import { employeeQuerySchema } from '../schemas/employee.schema';
+import { generateInitials } from '../utils/avatar';
 import { sendError, sendSuccess } from '../utils/response';
 
-export async function getHealthStatus(
-  _req: Request,
-  res: Response
-): Promise<void> {
-  try {
-    await checkDatabaseConnection();
+interface EmployeeCardRow extends RowDataPacket {
+  id: number;
+  full_name: string;
+  nickname: string;
+  photo_url: string | null;
+}
 
-    sendSuccess(
-      res,
-      200,
-      {
-        status: 'ok',
-        database: 'connected',
-        timestamp: new Date().toISOString(),
-      },
-      'Server dan database berjalan normal'
-    );
+export async function getEmployees(req: Request, res: Response): Promise<void> {
+  const parseResult = employeeQuerySchema.safeParse(req.query);
+
+  if (!parseResult.success) {
+    const firstErrorMessage = parseResult.error.issues[0]?.message || 'Parameter pencarian tidak valid';
+    sendError(res, 400, firstErrorMessage);
+    return;
+  }
+
+  const { search } = parseResult.data;
+
+  try {
+    let query = `
+      SELECT id, full_name, nickname, photo_url
+      FROM employees
+      WHERE status = 'published'
+    `;
+    const queryParams: unknown[] = [];
+
+    if (search && search.length > 0) {
+      query += ` AND (full_name LIKE ? OR nickname LIKE ?)`;
+      const searchPattern = `%${search}%`;
+      queryParams.push(searchPattern, searchPattern);
+    }
+
+    query += ` ORDER BY full_name ASC`;
+
+    const [rows] = await pool.query<EmployeeCardRow[]>(query, queryParams);
+
+    const employees = rows.map((emp) => ({
+      id: emp.id,
+      full_name: emp.full_name,
+      nickname: emp.nickname,
+      photo_url: emp.photo_url,
+      initials: generateInitials(emp.full_name),
+    }));
+
+    sendSuccess(res, 200, employees, 'Daftar karyawan berhasil diambil');
   } catch (error) {
-    console.error('[Health Check Error]', error);
-    sendError(res, 500, 'Gagal terhubung ke database', {
-      status: 'error',
-      database: 'disconnected',
-    });
+    console.error('[GetEmployees Error]', error);
+    sendError(res, 500, 'Gagal mengambil daftar karyawan');
   }
 }
 ```
 
-#### `server/src/routes/health.route.ts`
+---
+
+### 5. Route Definition & Registrasi
+
+#### `server/src/routes/employee.route.ts`
 ```typescript
 import { Router } from 'express';
-import { getHealthStatus } from '../controllers/health.controller';
+import { getEmployees } from '../controllers/employee.controller';
+import { authenticate } from '../middleware/auth.middleware';
 
 const router = Router();
 
-router.get('/health', getHealthStatus);
+// GET /api/employees (wajib login)
+router.get('/employees', authenticate, getEmployees);
 
 export default router;
 ```
@@ -538,81 +353,38 @@ export default router;
 ```typescript
 import { Router } from 'express';
 import healthRoutes from './health.route';
+import employeeRoutes from './employee.route';
 
 const router = Router();
 
 router.use('/', healthRoutes);
+router.use('/', employeeRoutes);
 
 export default router;
 ```
 
 ---
 
-## Panduan Verifikasi & Acceptance Criteria (Langkah Uji Wajib)
+## Panduan Pengujian & Acceptance Criteria
 
-Issue ini dinyatakan **SELESAI** hanya jika seluruh pemeriksaan di bawah ini berhasil:
+Fitur dinyatakan **SELESAI & LULUS** jika seluruh skenario uji berikut terpenuhi:
 
-### 1. Verifikasi TypeScript & Build (Zero Error)
-Jalankan dari folder `server/`:
-```bash
-npm run typecheck
-npm run build
-```
-- **Ekspektasi:** Keluar dengan exit code `0`, tidak ada error TypeScript, tidak ada tipe `any`, dan folder `server/dist/` terbentuk.
-
-### 2. Verifikasi Database Schema & Seed di MySQL
-Jalankan query verifikasi berikut di MySQL:
-```sql
-USE warga_halim;
-SHOW TABLES;
-DESCRIBE employees;
-SELECT id, name, email, role, employee_id, is_active, LEFT(password_hash, 7) AS hash_prefix FROM users;
-```
-- **Ekspektasi:**
-  - `SHOW TABLES` menampilkan tepat 5 tabel: `employees`, `memories`, `memory_employees`, `messages`, `users`.
-  - `DESCRIBE employees` **tidak memiliki** kolom `position`, `division`, `year_joined`, atau `year_left`.
-  - Seluruh baris `users` memiliki `hash_prefix` berawalan `$2a$` atau `$2b$` (bukan plaintext) dan terdapat tepat 1 baris `role = 'admin'`.
-
-### 3. Verifikasi Endpoint Health Check
-Jalankan server lokal:
-```bash
-npm run dev
-```
-Lalu uji endpoint (gunakan `curl` atau browser/Postman):
-```bash
-curl -i http://localhost:5000/api/health
-```
-- **Ekspektasi Sukses (`200 OK`):**
-  ```json
-  {
-    "success": true,
-    "data": {
-      "status": "ok",
-      "database": "connected",
-      "timestamp": "2026-11-13T..."
-    },
-    "message": "Server dan database berjalan normal"
-  }
-  ```
-- **Uji Negatif 404:** Panggil `curl -i http://localhost:5000/api/tidak-ada` -> harus mengembalikan `404 Not Found` dengan `{ "success": false, "data": null, "message": "Endpoint tidak ditemukan" }`.
-- **Uji Negatif DB Mati (opsional):** Ubah sementara `DB_PORT` di `.env` lokal ke port salah -> restart server / panggil `/api/health` -> harus gagal dengan pesan ramah tanpa membocorkan `DB_PASSWORD` atau kredensial di respons JSON.
-
-### 4. Verifikasi Keamanan Git (Anti-Credential Leak)
-Jalankan dari root repo:
-```bash
-git status
-```
-- **Ekspektasi:**
-  - File `server/.env` **TIDAK BOLEH** muncul di output `git status` (terabaikan oleh `.gitignore`).
-  - Folder `server/node_modules/` dan `server/dist/` **TIDAK BOLEH** terlacak Git.
-  - File `server/.env.example` **BOLEH** dan **HARUS** terlacak Git tanpa isi rahasia.
+| ID Uji | Skenario | Langkah Pengujian | Ekspektasi Hasil |
+| --- | --- | --- | --- |
+| **TC-01** | Akses tanpa token (Pengunjung) | `curl -i http://localhost:5000/api/employees` | HTTP `401 Unauthorized`. Format JSON `{ "success": false, "data": null, "message": "Akses ditolak. Token autentikasi tidak ditemukan" }`. |
+| **TC-02** | Ambil semua karyawan terbit | Kirim request dengan header `Authorization: Bearer <valid_token>`. | HTTP `200 OK`. `data` berupa array karyawan `published`. Setiap objek memiliki `id`, `full_name`, `nickname`, `photo_url`, `initials`. Kolom biodata detail (`contact`, `hometown`, `quote`, dll.) **tidak ada**. |
+| **TC-03** | Filter data draft | Periksa database apakah karyawan berstatus `draft` (contoh: Fauziyah `id: 5`) ikut terambil. | Karyawan berstatus `draft` **TIDAK MUNCUL** pada daftar. |
+| **TC-04** | Pencarian nama berhasil | `curl -i -H "Authorization: Bearer <token>" "http://localhost:5000/api/employees?search=andi"` | HTTP `200 OK`. Hanya mengembalikan karyawan yang memiliki nama lengkap atau panggilan memuat kata `"andi"` (case-insensitive). |
+| **TC-05** | Pencarian tanpa hasil | `curl -i -H "Authorization: Bearer <token>" "http://localhost:5000/api/employees?search=namaTidakMungkinAda123"` | HTTP `200 OK`. `data: []` (array kosong), pesan sukses `"Daftar karyawan berhasil diambil"`. Server tidak boleh error `500`. |
+| **TC-06** | Keamanan SQL Injection | `curl -i -H "Authorization: Bearer <token>" "http://localhost:5000/api/employees?search=' OR '1'='1"` | Parameterized query bekerja. Query tidak tembus; server tidak mengembalikan seluruh tabel atau membocorkan data draft, serta tidak mengalami error `500`. |
+| **TC-07** | Akun dinonaktifkan (`is_active = 0`) | Kirim token milik user yang statusnya `is_active = 0`. | HTTP `403 Forbidden` (`"Akses ditolak. Akun Anda telah dinonaktifkan..."`). |
 
 ---
 
-## Jebakan Umum yang Harus Dihindari (Checklist Review)
+## Checklist Review Akhir Sebelum Submit
 
-- **Jebakan 1 — Memanggil `app.listen()` di `app.ts`:** Ini akan menyebabkan Vercel Serverless gagal menjalankan fungsi. Pastikan `app.listen()` hanya ada di `server.ts`.
-- **Jebakan 2 — Mengembalikan kolom `position` atau membuat tabel tambahan:** Selalu ikuti `schema.sql` dan `docs/DATABASE_DESIGN.md` versi terbaru.
-- **Jebakan 3 — Membaca `process.env` langsung di banyak file tanpa validasi:** Selalu impor `env` dari `src/config/env.ts` agar tipe data (`number` untuk `PORT` dan `DB_PORT`, `string` tervalidasi untuk `JWT_SECRET`) terjamin oleh TypeScript.
-- **Jebakan 4 — Lupa melepas koneksi pool:** Jika menggunakan `pool.getConnection()`, wajib bungkus dengan `try { ... } finally { connection.release(); }`.
-- **Jebakan 5 — Meng-commit `.env`:** Selalu cek `git status` dan `git diff --cached` sebelum `git commit`.
+- [ ] Tidak ada tipe `any` pada kode TypeScript (`npm run typecheck` lulus tanpa error).
+- [ ] Tidak ada kolom `position` / jabatan yang diseleksi atau dikembalikan.
+- [ ] Parameterized query (`?`) digunakan untuk semua parameter pencarian SQL.
+- [ ] Middleware `authenticate` terpasang pada route `/employees`.
+- [ ] File `.env` tidak masuk ke Git (`git status` bersih dari file secret).
