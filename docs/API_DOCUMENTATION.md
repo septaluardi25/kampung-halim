@@ -42,7 +42,7 @@ Dokumen ini mendefinisikan kontrak REST API berdasarkan [PRD.md](file:///c:/User
   - `429 Too Many Requests`: Melebihi batas percobaan login (5x/menit).
   - `500 Internal Server Error`: Kesalahan server.
 
-> **Catatan Scope PRD:** Tidak ada endpoint registrasi publik (`POST /api/auth/register`), tidak ada endpoint pesan milik user (`/api/me/messages`), dan tidak ada endpoint edit pesan (`PUT /api/admin/messages/:id`).
+> **Catatan Scope PRD:** Tidak ada endpoint registrasi publik (`POST /api/auth/register`), tidak ada endpoint tulis/ubah/hapus pesan oleh user (`/api/messages` hanya `GET`), dan tidak ada endpoint edit pesan (`PUT`/`PATCH`) di mana pun.
 
 ---
 
@@ -265,78 +265,6 @@ Seluruh endpoint pada bagian ini wajib melewati middleware `authenticate` (JWT v
   }
   ```
 
-### 3.7 `POST /api/messages` (Tulis Pesan oleh User)
-- **Akses:** User login yang profilnya sudah tertaut ke karyawan (`req.user.employee_id IS NOT NULL`).
-- **Aturan Khusus & Keamanan:**
-  - **User Belum Ditautkan:** Jika akun login belum memiliki relasi ke data karyawan (`req.user.employee_id === null`), server menolak dengan **`403 Forbidden`** (`"Akun belum ditautkan ke data karyawan. Anda tidak dapat menulis pesan."`).
-  - **Integritas Kepemilikan (Anti-Impersonasi):** Server **wajib mengambil `sender_employee_id` dari `req.user.employee_id`**, dan **tidak mempercayai** `sender_employee_id` yang dikirim dari payload frontend. Ini menjamin user tidak dapat memalsukan pengirim atau menulis atas nama orang lain.
-  - **Cegah Kirim ke Diri Sendiri:** Jika `recipient_employee_id === req.user.employee_id`, server mengembalikan **`400 Bad Request`** (`"Tidak dapat mengirim pesan kepada diri sendiri"`).
-- **Request Body (Zod):**
-  ```json
-  {
-    "recipient_employee_id": 1,
-    "message": "Terima kasih banyak telah menjadi mentor yang hebat!",
-    "impression": "Pekerja keras dan sangat solutif."
-  }
-  ```
-- **Respons `201 Created`:**
-  ```json
-  {
-    "success": true,
-    "data": {
-      "id": 6,
-      "sender_employee_id": 2,
-      "recipient_employee_id": 1,
-      "message": "Terima kasih banyak telah menjadi mentor yang hebat!",
-      "impression": "Pekerja keras dan sangat solutif.",
-      "created_at": "2026-11-13T10:30:00.000Z",
-      "updated_at": "2026-11-13T10:30:00.000Z"
-    },
-    "message": "Pesan dan kesan berhasil dikirim"
-  }
-  ```
-
-### 3.8 `PUT /api/messages/:id` (Ubah Pesan Sendiri)
-- **Akses:** User pemilik pesan (`message.sender_employee_id === req.user.employee_id`).
-- **Aturan Proteksi:**
-  - Jika pesan dengan `:id` tidak ditemukan, kembalikan **`404 Not Found`**.
-  - Jika user mencoba mengubah pesan milik orang lain (`message.sender_employee_id !== req.user.employee_id`), server wajib mengembalikan **`403 Forbidden`** (`"Anda tidak memiliki izin untuk mengubah pesan ini"`).
-- **Request Body (Zod):**
-  ```json
-  {
-    "message": "Pesan revisi yang lebih detail...",
-    "impression": "Kesan yang diperbarui."
-  }
-  ```
-- **Respons `200 OK`:**
-  ```json
-  {
-    "success": true,
-    "data": {
-      "id": 6,
-      "sender_employee_id": 2,
-      "recipient_employee_id": 1,
-      "message": "Pesan revisi yang lebih detail...",
-      "impression": "Kesan yang diperbarui.",
-      "created_at": "2026-11-13T10:30:00.000Z",
-      "updated_at": "2026-11-13T10:45:00.000Z"
-    },
-    "message": "Pesan berhasil diperbarui"
-  }
-  ```
-
-### 3.9 `DELETE /api/messages/:id` (Hapus Pesan Sendiri / Admin)
-- **Akses:** User pemilik pesan (`message.sender_employee_id === req.user.employee_id`) atau Admin.
-- **Aturan:** Jika bukan pemilik pesan dan bukan admin, tolak dengan **`403 Forbidden`**.
-- **Respons `200 OK`:**
-  ```json
-  {
-    "success": true,
-    "data": null,
-    "message": "Pesan berhasil dihapus"
-  }
-  ```
-
 ---
 
 ## 4. Endpoint Panel Admin (`Admin` Saja)
@@ -345,20 +273,20 @@ Seluruh endpoint di bawah ini wajib melewati middleware `authenticate` dan `auth
 
 ### 4.1 Kelola Karyawan (`/api/admin/employees`)
 
-- **`GET /api/admin/employees`**: Mengambil seluruh data karyawan termasuk yang berstatus `draft` (mendukung `?search=` opsional).
+- **`GET /api/admin/employees`**: Mengambil seluruh data karyawan termasuk yang berstatus `draft` dan `published` (mendukung `?search=` opsional pada `full_name`).
 - **`GET /api/admin/employees/:id`**: Mengambil detail 1 karyawan (termasuk `draft`) untuk kebutuhan edit form.
 - **`POST /api/admin/employees`**: Membuat data karyawan baru.
-  - **Body (Zod):** `full_name`, `nickname`, `status` (`draft` | `published`) wajib; `hometown`, `hobby`, `contact`, `favorite_quote` opsional (`null` bila kosong).
-  - **Respons:** `201 Created` dengan data karyawan baru.
-- **`PUT /api/admin/employees/:id`**: Memperbarui data biodata karyawan (mengembalikan `404` bila ID tidak ditemukan).
-- **`DELETE /api/admin/employees/:id`**: Menghapus karyawan (beserta foto di Vercel Blob jika ada; pesan dan tag terkait ikut terhapus `ON DELETE CASCADE`).
+  - **Body (Zod):** `full_name` wajib diisi; `nickname` wajib atau diturunkan dari kata pertama jika opsional, `status` (`draft` | `published`, default `'draft'`); `hometown`, `hobby`, `contact`, `favorite_quote` opsional (`null` bila kosong).
+  - **Respons:** `201 Created` dengan data karyawan baru (tanpa data akun/password).
+- **`PUT /api/admin/employees/:id`**: Memperbarui data biodata dan status (`draft`/`published`) karyawan (mengembalikan `404` bila ID tidak ditemukan).
+- **`DELETE /api/admin/employees/:id`**: Menghapus karyawan (beserta foto di Vercel Blob jika ada; pesan dan tag terkait ikut terhapus `ON DELETE CASCADE`, sementara `users.employee_id` di-set `NULL` via `ON DELETE SET NULL`).
 
 ### 4.2 Kelola Foto Karyawan (`/api/admin/employees/:id/photo`)
 
 - **`POST /api/admin/employees/:id/photo`**:
   - **Content-Type:** `multipart/form-data` (field `photo`).
-  - **Validasi:** Wajib JPG (`image/jpeg`), PNG (`image/png`), atau WebP (`image/webp`), ukuran maksimal **2 MB**.
-  - **Proses:** Unggah buffer ke **Vercel Blob**, hapus blob foto lama jika sebelumnya sudah ada, simpan URL baru ke `employees.photo_url`.
+  - **Validasi Ganda di Server:** Wajib JPG (`image/jpeg`), PNG (`image/png`), atau WebP (`image/webp`), ukuran maksimal **2 MB**, serta pemeriksaan **file signature (magic bytes)** buffer gambar (`FF D8 FF` untuk JPG, `89 50 4E 47 0D 0A 1A 0A` untuk PNG, `RIFF....WEBP` untuk WebP). File dengan MIME/ekstensi palsu ditolak dengan `400 Bad Request`.
+  - **Proses:** Unggah buffer ke **Vercel Blob** (atau fallback URL lokal bila `BLOB_READ_WRITE_TOKEN` kosong pada mode uji lokal), hapus blob foto lama jika sebelumnya sudah ada, lalu simpan URL baru ke `employees.photo_url`. Kegagalan upload atau DB ditangani secara aman tanpa meninggalkan file yatim.
   - **Respons `200 OK`:** `{ "success": true, "data": { "photo_url": "https://..." }, "message": "Foto karyawan berhasil diunggah" }`.
 - **`DELETE /api/admin/employees/:id/photo`**:
   - Menghapus file foto dari **Vercel Blob** dan mengatur `employees.photo_url = null`.
@@ -366,19 +294,20 @@ Seluruh endpoint di bawah ini wajib melewati middleware `authenticate` dan `auth
 
 ### 4.3 Kelola Kenangan (`/api/admin/memories`)
 
-- **`GET /api/admin/memories`**: Mengambil seluruh kenangan (`draft` dan `published`), urut `event_date DESC`, beserta daftar karyawan yang di-tag.
-- **`GET /api/admin/memories/:id`**: Mengambil detail 1 kenangan (termasuk `draft`) beserta `employee_ids` untuk kebutuhan edit form.
+- **`GET /api/admin/memories`**: Mengambil seluruh kenangan (`draft` dan `published`), urut `event_date DESC, id DESC`, beserta daftar `employees` yang di-tag.
+- **`GET /api/admin/memories/:id`**: Mengambil detail 1 kenangan (termasuk `draft`) beserta `employee_ids` dan `employees` untuk kebutuhan edit form.
 - **`POST /api/admin/memories`**:
   - **Body (Zod):** `{ "title": "...", "event_date": "YYYY-MM-DD", "story": "...", "status": "draft" | "published", "employee_ids": [1, 2] }`.
-  - Menyimpan `memories` dan `memory_employees` dalam satu transaksi database (`201 Created`).
-- **`PUT /api/admin/memories/:id`**: Memperbarui data kenangan dan menyinkronkan `memory_employees` dalam satu transaksi database.
+  - Memvalidasi bahwa seluruh ID pada `employee_ids` adalah karyawan yang valid (`400 Bad Request` bila ada ID yang tidak ditemukan).
+  - Menyimpan `memories` dan `memory_employees` dalam **satu transaksi MySQL** (`beginTransaction` -> `commit`, atau `rollback` otomatis jika salah satu gagal). Mengembalikan `201 Created`.
+- **`PUT /api/admin/memories/:id`**: Memperbarui judul, tanggal, cerita, status, dan menyinkronkan `memory_employees` dalam **satu transaksi MySQL** (`rollback` jika gagal).
 - **`DELETE /api/admin/memories/:id`**: Menghapus kenangan (beserta relasi `memory_employees` secara `CASCADE`).
 
 ### 4.4 Kelola Pesan dan Kesan (`/api/admin/messages`)
 
-> **Catatan:** Pesan ditulis dan diedit oleh user pemilik pesan via `/api/messages`. Admin bertindak sebagai pengawas untuk menghapus pesan tidak pantas atau membuat pesan arsip.
+> **Catatan:** Pesan hanya dapat dilihat, ditambahkan, dan dihapus oleh Admin melalui endpoint di bawah ini. **Tidak boleh ada endpoint `PUT` atau `PATCH` untuk pesan.** Pesan yang dibuat oleh Admin langsung aktif/terbit.
 
-- **`GET /api/admin/messages`**: Mengambil seluruh pesan beserta informasi pengirim (`sender_employee_id`) dan penerima (`recipient_employee_id`).
+- **`GET /api/admin/messages`**: Mengambil seluruh pesan beserta informasi pengirim (`sender_employee_id`, `sender_name`) dan penerima (`recipient_employee_id`, `recipient_name`).
 - **`POST /api/admin/messages`**:
   - **Body (Zod):**
     ```json
@@ -389,13 +318,13 @@ Seluruh endpoint di bawah ini wajib melewati middleware `authenticate` dan `auth
       "impression": "Rekan kerja yang sangat sabar."
     }
     ```
-  - **Validasi:** `sender_employee_id` dan `recipient_employee_id` wajib merujuk ke karyawan yang ada dan **harus berbeda** (`sender_employee_id !== recipient_employee_id`, bila sama kembalikan `400`). `message` wajib diisi; `impression` opsional (`null` bila kosong).
+  - **Validasi:** `sender_employee_id` dan `recipient_employee_id` wajib merujuk ke karyawan yang ada di tabel `employees` dan **harus berbeda** (`sender_employee_id !== recipient_employee_id`, bila sama kembalikan `400`). `message` wajib diisi; `impression` opsional (`null` bila kosong).
   - **Respons `201 Created`:** Mengembalikan objek pesan baru.
 - **`DELETE /api/admin/messages/:id`**: Menghapus pesan (`200 OK`, atau `404` bila ID tidak ditemukan).
 
 ### 4.5 Kelola Akun User (`/api/admin/users`)
 
-- **`GET /api/admin/users`**: Mengambil seluruh daftar akun user (tanpa `password_hash`).
+- **`GET /api/admin/users`**: Mengambil seluruh daftar akun user beserta info `employee_id` (tanpa `password_hash`).
 - **`POST /api/admin/users`**:
   - **Body (Zod):** `{ "name": "...", "email": "...", "password": "...", "is_active": true }`.
   - **Validasi Input (Zod):**
@@ -403,15 +332,16 @@ Seluruh endpoint di bawah ini wajib melewati middleware `authenticate` dan `auth
     - `email`: string, format email valid, minimal 5 karakter (`z.string().trim().min(5).email()`), wajib unik (jika sudah terdaftar tolak `409 Conflict`).
     - `password`: string, minimal 6 karakter (`z.string().min(6)`).
     - `is_active`: boolean (opsional, default `true`).
-  - Server selalu menetapkan `role = 'user'` dan wajib meng-crypt (hash) password menggunakan `bcryptjs` (salt rounds: 10) sebelum disimpan ke kolom `password_hash`.
+  - Server selalu menetapkan `role = 'user'` dan `employee_id = NULL` (penautan karyawan dilakukan di `PUT /api/admin/users/:id`), serta wajib meng-crypt (hash) password menggunakan `bcryptjs` (salt rounds: 10) sebelum disimpan ke kolom `password_hash`.
   - **Respons `201 Created`:** Mengembalikan data akun baru tanpa `password_hash`.
 - **`PUT /api/admin/users/:id`**:
   - **Body (Zod):**
     - `name`: opsional, minimal 5 karakter jika diisi.
-    - `email`: opsional, format email valid, minimal 5 karakter jika diisi.
-    - `is_active`: opsional, boolean.
+    - `email`: opsional, format email valid, minimal 5 karakter jika diisi (tolak `409` jika bentrok dengan email user lain).
     - `password`: opsional, minimal 6 karakter jika diisi (wajib di-crypt dengan `bcryptjs` sebelum disimpan).
-  - Digunakan untuk mengubah profil akun, mengganti status aktif (`is_active`), atau mengatur ulang password oleh admin. Admin dicegah menonaktifkan akun admin miliknya sendiri (`400`).
+    - `is_active`: opsional, boolean.
+    - `employee_id`: opsional, `number | null` — **satu-satunya endpoint untuk menautkan atau melepas tautan akun user dengan karyawan**. Validasi bahwa `employee_id` ada di tabel `employees` (`400` jika tidak ditemukan) dan belum tertaut ke akun user lain (`409 Conflict` jika sudah dipakai user lain).
+  - **Proteksi Keamanan:** Admin tidak boleh mengubah `role` akun maupun menonaktifkan akun admin miliknya sendiri (`400 Bad Request`).
 - **`DELETE /api/admin/users/:id`**:
-  - Menghapus akun user. Admin dicegah menghapus akun admin miliknya sendiri (`400`).
+  - Menghapus akun user. Admin dicegah menghapus akun admin miliknya sendiri (`400 Bad Request`).
 

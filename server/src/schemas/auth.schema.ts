@@ -13,6 +13,13 @@ export const loginSchema = z.object({
 
 export type LoginInput = z.infer<typeof loginSchema>;
 
+export const userIdParamSchema = z.object({
+  id: z.coerce
+    .number({ message: 'ID user harus berupa angka' })
+    .int('ID user harus berupa bilangan bulat')
+    .positive('ID user harus lebih besar dari 0'),
+});
+
 export const createUserSchema = z.object({
   name: z
     .string()
@@ -27,6 +34,8 @@ export const createUserSchema = z.object({
     .string()
     .min(6, 'Password minimal 6 karakter'),
   is_active: z.boolean().default(true),
+  role: z.string().optional(),
+  employee_id: z.any().optional(),
 });
 
 export type CreateUserInput = z.infer<typeof createUserSchema>;
@@ -48,6 +57,13 @@ export const updateUserSchema = z.object({
     .min(6, 'Password minimal 6 karakter')
     .optional(),
   is_active: z.boolean().optional(),
+  role: z.string().optional(),
+  employee_id: z.coerce
+    .number({ message: 'ID karyawan harus berupa angka' })
+    .int('ID karyawan harus berupa bilangan bulat')
+    .positive('ID karyawan harus lebih besar dari 0')
+    .nullable()
+    .optional(),
 });
 
 export type UpdateUserInput = z.infer<typeof updateUserSchema>;

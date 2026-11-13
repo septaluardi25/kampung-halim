@@ -1,3 +1,5 @@
+import 'multer';
+
 export type UserRole = 'admin' | 'user';
 
 export interface AuthenticatedUser {

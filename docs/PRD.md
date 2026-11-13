@@ -104,15 +104,12 @@ Setiap fitur ditulis dengan aturan sederhana dan kriteria penerimaan (acceptance
 ### F4. Pesan dan Kesan (khusus login)
 
 - Satu pesan menghubungkan satu karyawan pengirim (*dari*) ke satu karyawan penerima (*untuk*). **Satu karyawan dapat memiliki banyak pesan untuk karyawan lainnya.** Berisi isi pesan dan, opsional, kesan singkat (satu kalimat).
-- Halaman pesan hanya dapat diakses oleh user yang sudah login.
-- **Hak Akses & Kepemilikan Pesan:**
-  - User login yang akunnya sudah tertaut ke profil karyawan (`employee_id IS NOT NULL`) dapat menulis pesan baru untuk rekan kerja lain dan mengedit pesan miliknya sendiri.
-  - **Integritas Kepemilikan:** Server **wajib** mengambil `sender_employee_id` dari identitas akun yang terautentikasi (`req.user.employee_id`), bukan mempercayai input dari frontend, untuk menjamin tidak ada user yang dapat menulis pesan atas nama orang lain.
-  - **User belum ditautkan (`employee_id IS NULL`):** Dilarang menulis pesan. UI menampilkan status akun belum tertaut dan server menolak pembuatan pesan dengan HTTP `403 Forbidden`.
-  - **Proteksi Edit Pesan:** User dilarang mengubah pesan orang lain. Server menolak request edit jika pembuat pesan bukan user yang sedang login (`403 Forbidden`).
-  - Admin tetap memiliki wewenang untuk menghapus pesan yang tidak pantas melalui Panel Admin.
+- Halaman pesan hanya dapat diakses oleh user yang sudah login (`GET /api/messages`).
+- **Hak Akses Pesan:**
+  - User yang sudah login hanya dapat membaca seluruh pesan dan kesan antar karyawan berstatus `published`. User tidak dapat menambah, mengubah, maupun menghapus pesan.
+  - Penambahan dan penghapusan pesan sepenuhnya dikelola oleh Admin melalui Panel Admin (`/admin/*`), **tanpa fitur edit pesan (`PUT`/`PATCH`)** baik untuk user maupun admin.
 - Halaman khusus (`/pesan`) menampilkan semua pesan terbit; di halaman detail karyawan (`/karyawan/:id`) menampilkan pesan terkait karyawan tersebut.
-- Selesai jika: pengunjung tanpa login diarahkan ke `/login`, user login tertaut bisa menulis & mengedit pesannya sendiri, user belum tertaut dicegah menulis pesan, user dilarang mengedit pesan orang lain, dan server mengunci identitas pengirim dari token login.
+- Selesai jika: pengunjung tanpa login diarahkan ke `/login`, user login bisa membaca seluruh pesan terbit dengan identitas pengirim dan penerima yang jelas, dan pesan hanya dapat ditambah/dihapus oleh Admin tanpa fitur edit.
 
 ### F5. Login dan Sesi User
 
@@ -175,7 +172,7 @@ Nuansa yang dituju: hangat, tenang, nostalgia. Bukan terasa seperti website bisn
 | Detail Karyawan | `/karyawan/:id` | User | Foto, biodata lengkap, kenangan terkait, pesan kesan (yang dikirim/diterima). Pengunjung diarahkan ke login |
 | Daftar Kenangan | `/kenangan` | User | Daftar kartu kenangan. Pengunjung diarahkan ke login |
 | Detail Kenangan | `/kenangan/:id` | User | Cerita lengkap, karyawan yang di-tag. Pengunjung diarahkan ke login |
-| Pesan dan Kesan | `/pesan` | User | Semua pesan antar karyawan (pengirim -> penerima), form tulis & edit pesan bagi user tertaut. Pengunjung diarahkan ke login |
+| Pesan dan Kesan | `/pesan` | User | Semua pesan antar karyawan (pengirim -> penerima) untuk dibaca user login. Pengunjung diarahkan ke login |
 | Login | `/login` | Publik | Form email dan password untuk admin dan user |
 | Panel Admin | `/admin/*` | Admin | Kelola karyawan (+ foto), kenangan, pesan (tambah & hapus), dan akun user |
 | Tidak ditemukan | `*` | Publik | Pesan "Halaman tidak ditemukan" dan tombol ke Home |
