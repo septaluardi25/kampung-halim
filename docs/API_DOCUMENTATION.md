@@ -79,6 +79,7 @@ Dokumen ini mendefinisikan kontrak REST API berdasarkan [PRD.md](file:///c:/User
   - `password`: string, minimal 6 karakter (`z.string().min(6)`).
 - **Aturan:**
   - Password diverifikasi menggunakan `bcryptjs` (mencocokkan plaintext dengan hash bcrypt pada kolom `password_hash`).
+  - Jangan membocorkan apakah email atau password yang salah: jika user tidak ditemukan atau password tidak cocok, kembalikan `401 Unauthorized` dengan pesan yang sama (`"Email atau password salah"`).
   - Jika `is_active = false` (0), tolak dengan `403 Forbidden`.
   - Jika berhasil, buat JWT (`expiresIn: '1d'`) yang ditandatangani menggunakan `JWT_SECRET`, berisi payload `{ id, email, role, employee_id }`.
 - **Respons `200 OK`:**
@@ -92,7 +93,10 @@ Dokumen ini mendefinisikan kontrak REST API berdasarkan [PRD.md](file:///c:/User
         "name": "Andi Budi",
         "email": "andi@example.com",
         "role": "user",
-        "is_active": true
+        "employee_id": 1,
+        "employeeId": 1,
+        "is_active": true,
+        "isActive": true
       }
     },
     "message": "Login berhasil"
@@ -107,7 +111,7 @@ Seluruh endpoint pada bagian ini wajib melewati middleware `authenticate` (JWT v
 
 ### 3.1 `GET /api/auth/me`
 - **Akses:** User atau Admin
-- **Deskripsi:** Memverifikasi token masih valid dan mengembalikan data akun user terkini dari database.
+- **Deskripsi:** Memverifikasi token masih valid dan mengembalikan data akun user terkini dari database (termasuk `employee_id`/`employeeId` dan `is_active`/`isActive`, tanpa `password_hash`).
 - **Respons `200 OK`:**
   ```json
   {
@@ -117,7 +121,10 @@ Seluruh endpoint pada bagian ini wajib melewati middleware `authenticate` (JWT v
       "name": "Andi Budi",
       "email": "andi@example.com",
       "role": "user",
-      "is_active": true
+      "employee_id": 1,
+      "employeeId": 1,
+      "is_active": true,
+      "isActive": true
     },
     "message": "Data akun berhasil diambil"
   }

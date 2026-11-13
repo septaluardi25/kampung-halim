@@ -1,367 +1,667 @@
-# ISSUE #03 — Implementasi & Pengujian Endpoint `GET /api/memories`, `GET /api/memories/:id`, dan `GET /api/messages`
+# ISSUE #04 — Implementasi Authentication & Authorization (`POST /api/auth/login`, `GET /api/auth/me`, Service Layer, Middleware `authenticate` & `authorize`, dan Rate Limiter)
 
 - **Proyek:** Warga Halim (`warga-halim`)
 - **Target Pembaca:** Junior Fullstack Developer & AI Coding Model
-- **Status:** `Open` (Tahap 3 — API Data Login: Kenangan & Pesan)
+- **Status:** `Open` (Tahap 2 — `T-06` & `T-07`: Login & Keamanan Backend)
 - **Dokumen Referensi Wajib:**
-  - [docs/PRD.md](./docs/PRD.md) — Bagian F3 (Kenangan), F4 (Pesan dan Kesan), & Bagian 9 (Technical Requirements)
-  - [docs/API_DOCUMENTATION.md](./docs/API_DOCUMENTATION.md) — Bagian 3.4 (`GET /api/memories`), 3.5 (`GET /api/memories/:id`), & 3.6 (`GET /api/messages`)
-  - [docs/DATABASE_DESIGN.md](./docs/DATABASE_DESIGN.md) — Bagian 3.2 (`employees`), 3.3 (`memories`), 3.4 (`memory_employees`), 3.5 (`messages`), & Bagian 4 (Aturan Relasi)
-  - [docs/DEVELOPMENT_PLAN.md](./docs/DEVELOPMENT_PLAN.md) — Task `T-10` & `T-11`
-  - [docs/TEST_PLAN.md](./docs/TEST_PLAN.md) — `TC-F3-01`, `TC-F3-02`, `TC-F4-01`, & `TC-SPEC-05`
+  - [docs/PRD.md](./docs/PRD.md) — Bagian 5 (F5 Login & Sesi User) & Bagian 9 (Technical Requirements & Struktur Folder)
+  - [docs/DEVELOPMENT_PLAN.md](./docs/DEVELOPMENT_PLAN.md) — Task `T-06` & `T-07`
+  - [docs/DATABASE_DESIGN.md](./docs/DATABASE_DESIGN.md) — Bagian 3.1 (Tabel `users`) & Bagian 4 (Aturan Relasi)
+  - [docs/API_DOCUMENTATION.md](./docs/API_DOCUMENTATION.md) — Bagian 1, 2.2 (`POST /api/auth/login`), & 3.1 (`GET /api/auth/me`)
+  - [docs/TEST_PLAN.md](./docs/TEST_PLAN.md) — Bagian 3.1 (`TC-AUTH-01` s.d. `TC-AUTH-09`) & 3.7 (Aturan Khusus Wajib)
 
 ---
 
 ## Ringkasan Tugas
 
-Implementasikan dan uji tiga endpoint baca terproteksi login untuk modul **Kenangan** dan **Pesan & Kesan**:
+Project sudah memiliki Express + TypeScript, koneksi MySQL pool (`server/src/db/pool.ts`), skema 5 tabel (`server/src/db/schema.sql`), centralized error handler (`server/src/middleware/error.middleware.ts`), utilitas password bcrypt (`server/src/utils/crypt.ts`), validasi Zod auth (`server/src/schemas/auth.schema.ts`), dan beberapa endpoint baca (`GET /api/health`, `GET /api/employees`, `GET /api/memories`, `GET /api/messages`).
 
-1. **`GET /api/memories`** — Mengambil daftar kenangan berstatus `published` (terbaru di atas berdasarkan `event_date DESC`).
-2. **`GET /api/memories/:id`** *(contoh: `GET /api/memories/1`)* — Mengambil detail satu kenangan `published` beserta daftar karyawan `published` yang di-tag pada kenangan tersebut.
-3. **`GET /api/messages`** — Mengambil seluruh pesan dan kesan antar karyawan di mana **pengirim dan penerima keduanya** berstatus `published` (terbaru di atas berdasarkan `created_at DESC`).
+Pada issue ini, implementasikan lapisan **Authentication & Authorization** secara bersih dan profesional dengan pemisahan arsitektur (`routes`, `controllers`, `services`, `schemas`, `middleware`, `types`):
 
-> **Prinsip Pengujian Wajib:** Setiap skenario pengujian API pada issue ini **WAJIB menghapus/me-reset seluruh data tabel database terlebih dahulu** sebelum memasukkan data uji (*fixture*), agar setiap skenario berjalan terisolasi, bersih, dan hasilnya 100% konsisten.
+1. **`POST /api/auth/login`** — Login user dan admin (validasi Zod, verifikasi `bcryptjs`, cek `is_active`, terbitkan JWT berlaku `1d`, dilindungi rate limiter maksimal **5 percobaan/menit**).
+2. **`GET /api/auth/me`** — Mengambil profil akun user/admin yang sedang login berdasarkan token JWT yang tervalidasi dan status terbaru di database.
+3. **`middleware/authenticate.ts`** & **`types/express.d.ts`** — Memverifikasi Bearer JWT, memeriksa user & `is_active` terbaru ke MySQL, mengambil `role` & `employee_id` terbaru dari database, serta menyematkannya ke `req.user`.
+4. **`middleware/authorize.ts`** — Middleware reusable untuk membatasi akses berdasarkan `role` (`authorize('admin')`, `authorize('admin', 'user')`, dan helper `authorizeAdmin`).
+5. **Kompatibilitas Route Eksisting (`middleware/auth.middleware.ts`)** — Re-export `authenticate` dan `authorize` agar route `/employees`, `/memories`, dan `/messages` tetap berjalan tanpa perlu duplikasi kode.
 
 ---
 
 ## Aturan Emas & Guardrails Wajib (PENTING DIBACA SEBELUM CODING)
 
-1. **WAJIB LOGIN (`authenticate` Middleware):**
-   - Ketiga endpoint **BUKAN** endpoint publik. Pengunjung tanpa header `Authorization: Bearer <token>` wajib ditolak dengan **`401 Unauthorized`** (`"Akses ditolak. Token autentikasi tidak ditemukan"`).
-   - Token tidak valid/kedaluwarsa wajib ditolak dengan **`401 Unauthorized`** (`"Token autentikasi tidak valid atau telah kedaluwarsa"`).
-   - Akun yang dinonaktifkan (`is_active = 0`) wajib ditolak dengan **`403 Forbidden`** (`"Akses ditolak. Akun Anda telah dinonaktifkan atau tidak ditemukan"`).
-   - Middleware `authenticate` sudah tersedia di `server/src/middleware/auth.middleware.ts` — langsung gunakan kembali, **jangan menduplikasi** logika verifikasi JWT.
+Aturan berikut telah disinkronkan dengan seluruh dokumen di folder `docs/` dan keputusan arsitektur proyek:
 
-2. **PROTEKSI VISIBILITAS DATA (`status = 'published'`):**
-   - **`GET /api/memories`:** Hanya mengembalikan baris `memories` dengan `status = 'published'`. Kenangan `draft` **dilarang** muncul.
-   - **`GET /api/memories/:id`:**
-     - Jika `:id` tidak ada atau masih berstatus `draft`, kembalikan **`404 Not Found`** (`"Kenangan tidak ditemukan"`). Jangan beri tahu apakah ID tersebut berstatus `draft` untuk mencegah kebocoran informasi.
-     - Daftar `employees` yang di-tag melalui tabel `memory_employees` **wajib difilter `e.status = 'published'`**. Jika ada karyawan `draft` ikut di-tag, karyawan tersebut tidak boleh muncul di array `employees`.
-   - **`GET /api/messages`:**
-     - Hanya mengembalikan pesan jika **kedua** pihak (`sender` DAN `recipient`) berstatus `published` (`s.status = 'published' AND r.status = 'published'`).
-     - Jika salah satu dari pengirim atau penerima berstatus `draft`, pesan tersebut **wajib disembunyikan** agar nama karyawan `draft` tidak bocor.
+1. **TIDAK ADA REGISTRASI MANDIRI (`POST /api/auth/register` DITIADAKAN):**
+   - Sesuai `PRD.md` (F5), `API_DOCUMENTATION.md`, dan `TEST_PLAN.md` (`TC-AUTH-09`), Warga Halim adalah aplikasi internal tertutup: **tidak ada endpoint `POST /api/auth/register`**.
+   - Akun `user` hanya dibuat oleh Admin di modul Panel Admin, sedangkan akun `admin` hanya dibuat melalui file `seed.sql`.
+   - Permintaan ke `POST /api/auth/register` wajib otomatis ditolak oleh `notFoundHandler` dengan HTTP **`404 Not Found`**.
 
-3. **TANPA KOLOM JABATAN (`position`) & TANPA DATA SENSITIF:**
-   - Kolom `position` / `sender_position` / `recipient_position` **SUDAH DIHAPUS** dari schema dan dokumentasi. **Dilarang** menyeleksi atau mengembalikan field tersebut.
-   - Jangan mengembalikan `password_hash`, `email`, `contact`, `hometown`, atau biodata detail lainnya pada ketiga endpoint ini.
-   - Gunakan helper `generateInitials` yang sudah ada di `server/src/utils/avatar.ts` untuk mengisi `initials`, `sender_initials`, dan `recipient_initials`.
+2. **ATURAN VALIDASI ZOD USER (SUDAH TERPASANG DI `auth.schema.ts`):**
+   - `email`: string, trim, **minimal 5 karakter**, format email valid (`z.string().trim().min(5).email()`).
+   - `password`: string, **minimal 6 karakter** (`z.string().min(6)`).
+   - `name` (pada create/update user): string, trim, **minimal 5 karakter**.
 
-4. **FORMAT TANGGAL & URUTAN DATA:**
-   - Pada `GET /api/memories` dan `GET /api/memories/:id`, format `event_date` wajib string `"YYYY-MM-DD"` (gunakan `DATE_FORMAT(event_date, '%Y-%m-%d') AS event_date` di SQL agar driver `mysql2` tidak mengubahnya menjadi objek `Date` dengan pergeseran timezone).
-   - Urutan `GET /api/memories`: `ORDER BY event_date DESC, id DESC`.
-   - Urutan `GET /api/messages`: `ORDER BY m.created_at DESC, m.id DESC`.
+3. **KEAMANAN PASSWORD & ANTI USER-ENUMERATION:**
+   - Wajib menggunakan `verifyPassword` (`bcryptjs`) dari `server/src/utils/crypt.ts`.
+   - **JANGAN PERNAH** mengembalikan kolom `password_hash` di response API mana pun.
+   - **JANGAN MEMBOCORKAN** apakah `email` tidak ditemukan atau `password` salah: keduanya wajib mengembalikan HTTP **`401 Unauthorized`** dengan pesan seragam `"Email atau password salah"`.
+   - Jika email dan password benar tetapi akun nonaktif (`is_active !== 1`), kembalikan HTTP **`403 Forbidden`** dengan pesan `"Akun Anda telah dinonaktifkan. Silakan hubungi admin"`.
 
-5. **VALIDASI ZOD, PARAMETERIZED QUERY, & TYPESCRIPT STRICT:**
-   - Validasi parameter `:id` pada `GET /api/memories/:id` dengan Zod (`z.coerce.number().int().positive()`). Jika tidak valid (contoh: `/api/memories/abc` atau `/api/memories/0`), kembalikan **`400 Bad Request`**.
-   - Semua query SQL wajib menggunakan placeholder `?` dari `mysql2/promise`. Dilarang melakukan string interpolation di dalam query SQL.
-   - Mode TypeScript `strict: true` dan `noImplicitAny: true` — **dilarang memakai tipe `any`**.
-   - **Keamanan Kredensial:** File `.env` tidak boleh di-commit ke Git (sudah diblokir `.gitignore`). Jangan pernah menulis password, `JWT_SECRET`, atau kredensial DB di kode sumber atau script test.
+4. **KONFIGURASI JWT (`jsonwebtoken`):**
+   - Secret wajib berasal dari `env.JWT_SECRET` (`server/src/config/env.ts`, yang membaca `.env`). Jangan hardcode secret di kode!
+   - Masa berlaku token: **`expiresIn: '1d'`** (1 hari).
+   - Payload minimal JWT berisi: `{ id, email, role, employee_id }`.
+   - Saat verifikasi di `authenticate.ts`, **jangan pernah percaya role/status lama di dalam token saja** — selalu query ulang ke database (`SELECT id, name, email, role, employee_id, is_active FROM users WHERE id = ? LIMIT 1`) agar pencabutan akses (`is_active = 0`) atau perubahan `role`/`employee_id` langsung berlaku seketika.
+
+5. **FORMAT RESPONSE STANDAR & KOMPATIBILITAS FIELD (`snake_case` + `camelCase`):**
+   - Seluruh respons wajib memakai `sendSuccess` / `sendError` (`{ success, data, message }`).
+   - Struktur `POST /api/auth/login` (`200 OK`):
+     ```json
+     {
+       "success": true,
+       "data": {
+         "token": "<jwt_token>",
+         "user": {
+           "id": 2,
+           "name": "Andi Budi",
+           "email": "andi@wargahalim.id",
+           "role": "user",
+           "employee_id": 1,
+           "employeeId": 1,
+           "is_active": true,
+           "isActive": true
+         }
+       },
+       "message": "Login berhasil"
+     }
+     ```
+   - Struktur `GET /api/auth/me` (`200 OK`):
+     ```json
+     {
+       "success": true,
+       "data": {
+         "id": 2,
+         "name": "Andi Budi",
+         "email": "andi@wargahalim.id",
+         "role": "user",
+         "employee_id": 1,
+         "employeeId": 1,
+         "is_active": true,
+         "isActive": true
+       },
+       "message": "Data akun berhasil diambil"
+     }
+     ```
+
+6. **RATE LIMITING (`POST /api/auth/login`):**
+   - Gunakan `express-rate-limit`: maksimal **5 request per 1 menit** (`windowMs: 60 * 1000, max: 5`).
+   - Jika melebihi batas, kembalikan HTTP **`429 Too Many Requests`** dengan format `{ success: false, data: null, message: "Terlalu banyak percobaan login. Silakan coba lagi setelah 1 menit" }`.
+   - *Catatan Test:* Untuk pengujian non-test-mode agar unit/integration test tidak terganggu, buat factory atau konfigurasi rate limiter yang jelas dan tetap bisa diuji pada skenario `TC-AUTH-13`.
+
+7. **PEMISAHAN ARSITEKTUR & STRICT TYPESCRIPT:**
+   - Pisahkan tanggung jawab secara tegas:
+     - `routes/` $\rightarrow$ Definisi endpoint & pemasangan middleware (`rateLimiter`, `authenticate`, `authorize`).
+     - `controllers/` $\rightarrow$ Validasi Zod (`safeParse`), pemanggilan service, pengiriman HTTP status & response (`sendSuccess` / `sendError`).
+     - `services/` $\rightarrow$ Business logic, query SQL berparameter (`?`), verifikasi password, dan pembuatan JWT.
+     - `schemas/` $\rightarrow$ Definisi skema validasi Zod.
+     - `middleware/` $\rightarrow$ `authenticate.ts`, `authorize.ts`, `rateLimiter.ts`, `error.middleware.ts`.
+     - `types/` $\rightarrow$ `express.d.ts` (TypeScript Request augmentation).
+   - Mode TypeScript `"strict": true` — **DILARANG keras memakai tipe `any`**.
+   - **JANGAN** mengerjakan modul Admin CRUD (`/api/admin/*`) maupun User Message write API (`POST/PUT/DELETE /api/messages`) di issue ini. Fokus hanya pada Authentication & Authorization.
+   - **KEAMANAN GIT:** Jangan pernah commit `.env` atau kredensial apa pun ke Git.
 
 ---
 
-## Struktur Folder Aplikasi (Kecil, Rapi, & Profesional)
-
-Gunakan struktur modular yang sudah ada di `server/src/`. Tidak perlu menambah lapisan abstraksi berlebihan; cukup pisahkan `schemas/`, `controllers/`, dan `routes/`:
+## Struktur Folder Target (`server/`)
 
 ```text
 server/
-├── .env                                # LOKAL SAJA (terblokir oleh .gitignore)
-├── .env.example                        # Template aman untuk Git
+├── .env                         # [JANGAN DI-COMMIT] Kredensial lokal (wajib ada di .gitignore)
+├── .env.example                 # Template env tanpa nilai rahasia
 ├── package.json
 ├── tsconfig.json
-├── vercel.json
 └── src/
     ├── config/
-    │   └── env.ts                      # Konfigurasi environment tervalidasi (Zod)
+    │   └── env.ts               # Sudah ada: validasi env termasuk JWT_SECRET
+    ├── types/
+    │   └── express.d.ts         # [BARU] Request augmentation (req.user)
     ├── db/
-    │   ├── pool.ts                     # Koneksi MySQL2 connection pool (connectionLimit: 5)
-    │   ├── schema.sql                  # DDL 5 tabel (employees, users, memories, memory_employees, messages)
-    │   └── seed.sql                    # Data awal contoh
-    ├── utils/
-    │   ├── response.ts                 # Helper sendSuccess & sendError
-    │   ├── avatar.ts                   # Helper generateInitials(fullName)
-    │   └── crypt.ts                    # Helper bcryptjs
-    ├── middleware/
-    │   ├── auth.middleware.ts          # Middleware authenticate (JWT + cek is_active = 1)
-    │   └── error.middleware.ts         # Handler 404 & global server error
+    │   ├── pool.ts              # Sudah ada: mysql2 connection pool
+    │   ├── schema.sql           # Sudah ada: 5 tabel
+    │   └── seed.sql             # Sudah ada: seed admin & sample data
     ├── schemas/
-    │   ├── auth.schema.ts              # Validasi Zod login & user
-    │   ├── employee.schema.ts          # Validasi Zod query karyawan
-    │   └── memory.schema.ts            # [BARU] Validasi Zod parameter :id kenangan
+    │   ├── auth.schema.ts       # Sudah ada: loginSchema (email min 5, password min 6)
+    │   ├── employee.schema.ts
+    │   └── memory.schema.ts
+    ├── services/
+    │   └── auth.service.ts      # [BARU] Business logic login & getCurrentUser + JWT
     ├── controllers/
-    │   ├── health.controller.ts        # Controller GET /api/health
-    │   ├── employee.controller.ts      # Controller GET /api/employees
-    │   ├── memory.controller.ts        # [BARU] Controller getMemories & getMemoryById
-    │   └── message.controller.ts       # [BARU] Controller getMessages
+    │   ├── auth.controller.ts   # [BARU] Handler HTTP POST /login & GET /me
+    │   ├── employee.controller.ts
+    │   ├── health.controller.ts
+    │   ├── memory.controller.ts
+    │   └── message.controller.ts
+    ├── middleware/
+    │   ├── authenticate.ts      # [BARU] Verifikasi Bearer JWT + cek user & is_active di DB
+    │   ├── authorize.ts         # [BARU] Middleware role checker (user/admin) reusable
+    │   ├── rateLimiter.ts       # [BARU] express-rate-limit login (max 5 req/menit)
+    │   ├── auth.middleware.ts   # [MODIFIKASI] Re-export dari authenticate.ts & authorize.ts
+    │   └── error.middleware.ts
     ├── routes/
-    │   ├── health.route.ts             # Route GET /health
-    │   ├── employee.route.ts           # Route GET /employees
-    │   ├── memory.route.ts             # [BARU] Route GET /memories & GET /memories/:id
-    │   ├── message.route.ts            # [BARU] Route GET /messages
-    │   └── index.ts                    # [MODIFIKASI] Daftarkan memoryRoutes & messageRoutes
-    ├── app.ts                          # Express app (ekspor tanpa app.listen)
-    └── server.ts                       # Entry point lokal
+    │   ├── auth.route.ts        # [BARU] Route POST /auth/login & GET /auth/me
+    │   ├── employee.route.ts
+    │   ├── health.route.ts
+    │   ├── memory.route.ts
+    │   ├── message.route.ts
+    │   └── index.ts             # [MODIFIKASI] Daftarkan authRoutes
+    ├── utils/
+    │   ├── avatar.ts
+    │   ├── crypt.ts             # Sudah ada: hashPassword & verifyPassword (bcryptjs)
+    │   └── response.ts          # Sudah ada: sendSuccess & sendError
+    ├── app.ts                   # Sudah ada: Express app (ekspor tanpa app.listen)
+    └── server.ts                # Sudah ada: entry point lokal
 ```
 
 ---
 
 ## Rincian Checklist Pekerjaan
 
-- [x] **1. Buat Schema Validasi Parameter Kenangan (`server/src/schemas/memory.schema.ts`)**
-- [x] **2. Buat Controller Kenangan (`server/src/controllers/memory.controller.ts`)**
-- [x] **3. Buat Controller Pesan (`server/src/controllers/message.controller.ts`)**
-- [x] **4. Buat Route Kenangan & Pesan (`memory.route.ts`, `message.route.ts`) lalu Daftarkan di `routes/index.ts`**
-- [x] **5. Jalankan `npm run typecheck` dan `npm run build` (Zero Error, Tanpa `any`)**
-- [x] **6. Eksekusi Seluruh 16 Skenario Pengujian (Dengan Reset Data Sebelum Setiap Skenario)**
+- [x] **1. Buat TypeScript Request Augmentation (`server/src/types/express.d.ts`)**
+- [x] **2. Buat Middleware Autentikasi (`server/src/middleware/authenticate.ts`)**
+- [x] **3. Buat Middleware Otorisasi Reusable (`server/src/middleware/authorize.ts`)**
+- [x] **4. Perbarui `server/src/middleware/auth.middleware.ts` untuk Re-Export Kompatibilitas**
+- [x] **5. Buat Middleware Rate Limiter (`server/src/middleware/rateLimiter.ts`)**
+- [x] **6. Buat Service Layer Autentikasi (`server/src/services/auth.service.ts`)**
+- [x] **7. Buat Controller Autentikasi (`server/src/controllers/auth.controller.ts`)**
+- [x] **8. Buat Route Auth (`server/src/routes/auth.route.ts`) & Daftarkan di `routes/index.ts`**
+- [x] **9. Jalankan `npm run typecheck` dan `npm run build` (Zero Error, Tanpa `any`)**
+- [x] **10. Buat & Eksekusi Automated Tests (Middleware & Integration API untuk 14 Skenario, dengan Reset Data Sebelum Setiap Skenario)**
+- [x] **11. Tulis 6 Poin Penjelasan Wajib di Laporan Akhir**
 
 ---
 
 ## Panduan Implementasi Kode (Blueprint)
 
-### 1. Schema Validasi Parameter Kenangan (`server/src/schemas/memory.schema.ts`)
+### 1. TypeScript Request Augmentation (`server/src/types/express.d.ts`)
+
+Buat file baru untuk mendeklarasikan tipe `req.user` pada seluruh objek `Express.Request`:
 
 ```typescript
-import { z } from 'zod';
+export type UserRole = 'admin' | 'user';
 
-export const memoryIdParamSchema = z.object({
-  id: z.coerce
-    .number({ invalid_type_error: 'ID kenangan harus berupa angka' })
-    .int('ID kenangan harus berupa bilangan bulat')
-    .positive('ID kenangan harus lebih besar dari 0'),
-});
+export interface AuthenticatedUser {
+  id: number;
+  name: string;
+  email: string;
+  role: UserRole;
+  employee_id: number | null;
+}
 
-export type MemoryIdParam = z.infer<typeof memoryIdParamSchema>;
+declare global {
+  namespace Express {
+    interface Request {
+      user?: AuthenticatedUser;
+    }
+  }
+}
 ```
-
-> **Catatan Zod v4 / TypeScript:** Jika proyek memakai `zod` v4, apabila `invalid_type_error` tidak dikenali pada opsi `z.coerce.number(...)`, gunakan `z.coerce.number().int('ID kenangan harus berupa bilangan bulat').positive('ID kenangan harus lebih besar dari 0')`. Selalu cek dengan `npm run typecheck`.
 
 ---
 
-### 2. Controller Kenangan (`server/src/controllers/memory.controller.ts`)
+### 2. Verifikasi Schema Validasi (`server/src/schemas/auth.schema.ts`)
+
+File `server/src/schemas/auth.schema.ts` **sudah tersedia** dengan aturan yang telah disepakati (`name` min 5, `email` min 5 + format email valid, `password` min 6):
 
 ```typescript
-import type { Request, Response } from 'express';
+export const loginSchema = z.object({
+  email: z
+    .string()
+    .trim()
+    .min(5, 'Email minimal 5 karakter')
+    .email('Format email tidak valid'),
+  password: z
+    .string()
+    .min(6, 'Password minimal 6 karakter'),
+});
+```
+
+> Pastikan tetap mempertahankan isi `auth.schema.ts` dan gunakan `loginSchema.safeParse(req.body)` di controller.
+
+---
+
+### 3. Middleware Autentikasi (`server/src/middleware/authenticate.ts`)
+
+Bertanggung jawab penuh atas 8 langkah verifikasi token dan akun dari database:
+
+```typescript
+import type { NextFunction, Request, Response } from 'express';
+import jwt from 'jsonwebtoken';
 import type { RowDataPacket } from 'mysql2';
+import { env } from '../config/env';
 import { pool } from '../db/pool';
-import { memoryIdParamSchema } from '../schemas/memory.schema';
-import { generateInitials } from '../utils/avatar';
-import { sendError, sendSuccess } from '../utils/response';
+import type { UserRole } from '../types/express';
+import { sendError } from '../utils/response';
 
-interface MemoryListRow extends RowDataPacket {
+interface JwtTokenPayload {
   id: number;
-  title: string;
-  event_date: string;
-  story: string;
-  created_at: Date;
+  email: string;
+  role: UserRole;
+  employee_id: number | null;
 }
 
-interface TaggedEmployeeRow extends RowDataPacket {
+interface AuthUserRow extends RowDataPacket {
   id: number;
-  full_name: string;
-  photo_url: string | null;
+  name: string;
+  email: string;
+  role: UserRole;
+  employee_id: number | null;
+  is_active: number;
 }
 
-export async function getMemories(
-  _req: Request,
-  res: Response
-): Promise<void> {
-  try {
-    const query = `
-      SELECT
-        id,
-        title,
-        DATE_FORMAT(event_date, '%Y-%m-%d') AS event_date,
-        story,
-        created_at
-      FROM memories
-      WHERE status = 'published'
-      ORDER BY event_date DESC, id DESC
-    `;
-
-    const [rows] = await pool.query<MemoryListRow[]>(query);
-
-    sendSuccess(res, 200, rows, 'Daftar kenangan berhasil diambil');
-  } catch (error) {
-    console.error('[GetMemories Error]', error);
-    sendError(res, 500, 'Gagal mengambil daftar kenangan');
+function isValidJwtPayload(payload: unknown): payload is JwtTokenPayload {
+  if (typeof payload !== 'object' || payload === null) {
+    return false;
   }
+  const candidate = payload as Record<string, unknown>;
+  return (
+    typeof candidate.id === 'number' &&
+    typeof candidate.email === 'string' &&
+    (candidate.role === 'admin' || candidate.role === 'user')
+  );
 }
 
-export async function getMemoryById(
+export async function authenticate(
   req: Request,
-  res: Response
+  res: Response,
+  next: NextFunction
 ): Promise<void> {
-  const parseResult = memoryIdParamSchema.safeParse(req.params);
+  const authHeader = req.headers.authorization;
 
-  if (!parseResult.success) {
-    const firstError =
-      parseResult.error.issues[0]?.message || 'ID kenangan tidak valid';
-    sendError(res, 400, firstError);
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    sendError(res, 401, 'Akses ditolak. Token autentikasi tidak ditemukan');
     return;
   }
 
-  const { id } = parseResult.data;
+  const token = authHeader.slice(7).trim();
+
+  if (!token) {
+    sendError(res, 401, 'Akses ditolak. Token autentikasi tidak ditemukan');
+    return;
+  }
+
+  let decoded: unknown;
+  try {
+    decoded = jwt.verify(token, env.JWT_SECRET);
+  } catch {
+    sendError(res, 401, 'Token autentikasi tidak valid atau telah kedaluwarsa');
+    return;
+  }
+
+  if (!isValidJwtPayload(decoded)) {
+    sendError(res, 401, 'Token autentikasi tidak valid atau telah kedaluwarsa');
+    return;
+  }
 
   try {
-    const memoryQuery = `
-      SELECT
-        id,
-        title,
-        DATE_FORMAT(event_date, '%Y-%m-%d') AS event_date,
-        story
-      FROM memories
-      WHERE id = ? AND status = 'published'
-      LIMIT 1
-    `;
+    const [rows] = await pool.query<AuthUserRow[]>(
+      'SELECT id, name, email, role, employee_id, is_active FROM users WHERE id = ? LIMIT 1',
+      [decoded.id]
+    );
 
-    const [memoryRows] = await pool.query<MemoryListRow[]>(memoryQuery, [id]);
-
-    if (memoryRows.length === 0) {
-      sendError(res, 404, 'Kenangan tidak ditemukan');
+    if (rows.length === 0 || rows[0].is_active !== 1) {
+      sendError(
+        res,
+        403,
+        'Akses ditolak. Akun Anda telah dinonaktifkan atau tidak ditemukan'
+      );
       return;
     }
 
-    const employeesQuery = `
-      SELECT
-        e.id,
-        e.full_name,
-        e.photo_url
-      FROM memory_employees me
-      INNER JOIN employees e ON e.id = me.employee_id
-      WHERE me.memory_id = ? AND e.status = 'published'
-      ORDER BY e.full_name ASC
-    `;
+    const userRow = rows[0];
 
-    const [employeeRows] = await pool.query<TaggedEmployeeRow[]>(
-      employeesQuery,
-      [id]
-    );
+    // Selalu gunakan informasi identitas & role terbaru dari database
+    req.user = {
+      id: userRow.id,
+      name: userRow.name,
+      email: userRow.email,
+      role: userRow.role,
+      employee_id: userRow.employee_id,
+    };
 
-    const employees = employeeRows.map((emp) => ({
-      id: emp.id,
-      full_name: emp.full_name,
-      photo_url: emp.photo_url,
-      initials: generateInitials(emp.full_name),
-    }));
-
-    const memory = memoryRows[0];
-
-    sendSuccess(
-      res,
-      200,
-      {
-        id: memory.id,
-        title: memory.title,
-        event_date: memory.event_date,
-        story: memory.story,
-        employees,
-      },
-      'Detail kenangan berhasil diambil'
-    );
+    next();
   } catch (error) {
-    console.error('[GetMemoryById Error]', error);
-    sendError(res, 500, 'Gagal mengambil detail kenangan');
+    console.error('[Authenticate Error]', error);
+    sendError(res, 500, 'Gagal memverifikasi sesi pengguna');
   }
 }
 ```
 
 ---
 
-### 3. Controller Pesan (`server/src/controllers/message.controller.ts`)
+### 4. Middleware Otorisasi Reusable (`server/src/middleware/authorize.ts`)
+
+Middleware fleksibel yang memeriksa `req.user.role` (bukan input frontend):
+
+```typescript
+import type { NextFunction, Request, Response } from 'express';
+import type { UserRole } from '../types/express';
+import { sendError } from '../utils/response';
+
+/**
+ * Middleware factory reusable untuk membatasi akses endpoint berdasarkan role.
+ * Wajib dipanggil SETELAH middleware `authenticate`.
+ */
+export function authorize(...allowedRoles: UserRole[]) {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    if (!req.user) {
+      sendError(res, 401, 'Akses ditolak. Token autentikasi tidak ditemukan');
+      return;
+    }
+
+    if (!allowedRoles.includes(req.user.role)) {
+      sendError(
+        res,
+        403,
+        'Akses ditolak. Anda tidak memiliki izin untuk mengakses sumber daya ini'
+      );
+      return;
+    }
+
+    next();
+  };
+}
+
+/**
+ * Shorthand middleware khusus untuk endpoint Panel Admin (`role === 'admin'`).
+ */
+export const authorizeAdmin = authorize('admin');
+```
+
+---
+
+### 5. Update Kompatibilitas (`server/src/middleware/auth.middleware.ts`)
+
+Agar route yang sudah ada (`employee.route.ts`, `memory.route.ts`, `message.route.ts`) tidak perlu dirombak dan tidak ada duplikasi logika maupun bentrokan `declare global`, ubah `server/src/middleware/auth.middleware.ts` menjadi barrel re-export:
+
+```typescript
+export { authenticate } from './authenticate';
+export { authorize, authorizeAdmin } from './authorize';
+export type { AuthenticatedUser as AuthenticatedUserPayload } from '../types/express';
+```
+
+---
+
+### 6. Rate Limiter (`server/src/middleware/rateLimiter.ts`)
+
+```typescript
+import rateLimit from 'express-rate-limit';
+import type { Request, Response } from 'express';
+import { sendError } from '../utils/response';
+
+/**
+ * Membatasi percobaan login maksimal 5 request per 1 menit per IP.
+ */
+export function createLoginRateLimiter() {
+  return rateLimit({
+    windowMs: 60 * 1000, // 1 menit
+    max: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: (_req: Request, res: Response) => {
+      sendError(
+        res,
+        429,
+        'Terlalu banyak percobaan login. Silakan coba lagi setelah 1 menit'
+      );
+    },
+  });
+}
+
+export const loginRateLimiter = createLoginRateLimiter();
+```
+
+> **Catatan Testability:** Dengan mengekspor `createLoginRateLimiter()`, suite integration test dapat membuat instance app terisolasi atau me-reset counter sehingga uji rate limit pada `TC-AUTH-13` deterministik dan tidak memengaruhi skenario tes lainnya.
+
+---
+
+### 7. Service Layer Autentikasi (`server/src/services/auth.service.ts`)
+
+Pisahkan seluruh business logic dan query SQL berparameter ke dalam service:
+
+```typescript
+import jwt from 'jsonwebtoken';
+import type { RowDataPacket } from 'mysql2';
+import { env } from '../config/env';
+import { pool } from '../db/pool';
+import type { LoginInput } from '../schemas/auth.schema';
+import type { UserRole } from '../types/express';
+import { verifyPassword } from '../utils/crypt';
+
+interface UserAuthRow extends RowDataPacket {
+  id: number;
+  name: string;
+  email: string;
+  password_hash: string;
+  role: UserRole;
+  employee_id: number | null;
+  is_active: number;
+}
+
+interface UserProfileRow extends RowDataPacket {
+  id: number;
+  name: string;
+  email: string;
+  role: UserRole;
+  employee_id: number | null;
+  is_active: number;
+}
+
+export interface AuthUserProfile {
+  id: number;
+  name: string;
+  email: string;
+  role: UserRole;
+  employee_id: number | null;
+  employeeId: number | null;
+  is_active: boolean;
+  isActive: boolean;
+}
+
+export interface LoginResult {
+  token: string;
+  user: AuthUserProfile;
+}
+
+export class AuthServiceError extends Error {
+  public readonly statusCode: number;
+
+  constructor(statusCode: number, message: string) {
+    super(message);
+    this.statusCode = statusCode;
+    this.name = 'AuthServiceError';
+  }
+}
+
+function mapUserProfile(row: {
+  id: number;
+  name: string;
+  email: string;
+  role: UserRole;
+  employee_id: number | null;
+  is_active: number;
+}): AuthUserProfile {
+  const isActiveBool = row.is_active === 1;
+  return {
+    id: row.id,
+    name: row.name,
+    email: row.email,
+    role: row.role,
+    employee_id: row.employee_id,
+    employeeId: row.employee_id,
+    is_active: isActiveBool,
+    isActive: isActiveBool,
+  };
+}
+
+export async function loginUser(input: LoginInput): Promise<LoginResult> {
+  const normalizedEmail = input.email.trim().toLowerCase();
+
+  const [rows] = await pool.query<UserAuthRow[]>(
+    `SELECT id, name, email, password_hash, role, employee_id, is_active
+     FROM users
+     WHERE LOWER(email) = ?
+     LIMIT 1`,
+    [normalizedEmail]
+  );
+
+  // Jangan membocorkan apakah email atau password yang salah
+  if (rows.length === 0) {
+    throw new AuthServiceError(401, 'Email atau password salah');
+  }
+
+  const user = rows[0];
+  const isPasswordMatch = await verifyPassword(
+    input.password,
+    user.password_hash
+  );
+
+  if (!isPasswordMatch) {
+    throw new AuthServiceError(401, 'Email atau password salah');
+  }
+
+  if (user.is_active !== 1) {
+    throw new AuthServiceError(
+      403,
+      'Akun Anda telah dinonaktifkan. Silakan hubungi admin'
+    );
+  }
+
+  const token = jwt.sign(
+    {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      employee_id: user.employee_id,
+    },
+    env.JWT_SECRET,
+    { expiresIn: '1d' }
+  );
+
+  return {
+    token,
+    user: mapUserProfile(user),
+  };
+}
+
+export async function getCurrentUser(
+  userId: number
+): Promise<AuthUserProfile> {
+  const [rows] = await pool.query<UserProfileRow[]>(
+    `SELECT id, name, email, role, employee_id, is_active
+     FROM users
+     WHERE id = ?
+     LIMIT 1`,
+    [userId]
+  );
+
+  if (rows.length === 0) {
+    throw new AuthServiceError(404, 'Akun pengguna tidak ditemukan');
+  }
+
+  const user = rows[0];
+
+  if (user.is_active !== 1) {
+    throw new AuthServiceError(
+      403,
+      'Akses ditolak. Akun Anda telah dinonaktifkan atau tidak ditemukan'
+    );
+  }
+
+  return mapUserProfile(user);
+}
+```
+
+---
+
+### 8. Controller Autentikasi (`server/src/controllers/auth.controller.ts`)
+
+Controller hanya mengurus validasi request HTTP, pemanggilan service, dan penyusunan HTTP response:
 
 ```typescript
 import type { Request, Response } from 'express';
-import type { RowDataPacket } from 'mysql2';
-import { pool } from '../db/pool';
-import { generateInitials } from '../utils/avatar';
+import { loginSchema } from '../schemas/auth.schema';
+import {
+  AuthServiceError,
+  getCurrentUser,
+  loginUser,
+} from '../services/auth.service';
 import { sendError, sendSuccess } from '../utils/response';
 
-interface MessageRow extends RowDataPacket {
-  id: number;
-  sender_employee_id: number;
-  sender_name: string;
-  recipient_employee_id: number;
-  recipient_name: string;
-  message: string;
-  impression: string | null;
-  created_at: Date;
-  updated_at: Date;
+export async function login(req: Request, res: Response): Promise<void> {
+  const parseResult = loginSchema.safeParse(req.body);
+
+  if (!parseResult.success) {
+    const fieldErrors: Record<string, string> = {};
+    for (const issue of parseResult.error.issues) {
+      const key = String(issue.path[0] ?? 'body');
+      if (!fieldErrors[key]) {
+        fieldErrors[key] = issue.message;
+      }
+    }
+
+    const firstMessage =
+      parseResult.error.issues[0]?.message || 'Data login tidak valid';
+    sendError(res, 400, firstMessage, { errors: fieldErrors });
+    return;
+  }
+
+  try {
+    const result = await loginUser(parseResult.data);
+    sendSuccess(res, 200, result, 'Login berhasil');
+  } catch (error) {
+    if (error instanceof AuthServiceError) {
+      sendError(res, error.statusCode, error.message);
+      return;
+    }
+    console.error('[Login Error]', error);
+    sendError(res, 500, 'Gagal memproses login');
+  }
 }
 
-export async function getMessages(
-  _req: Request,
-  res: Response
-): Promise<void> {
+export async function me(req: Request, res: Response): Promise<void> {
+  if (!req.user) {
+    sendError(res, 401, 'Akses ditolak. Token autentikasi tidak ditemukan');
+    return;
+  }
+
   try {
-    const query = `
-      SELECT
-        m.id,
-        m.sender_employee_id,
-        s.full_name AS sender_name,
-        m.recipient_employee_id,
-        r.full_name AS recipient_name,
-        m.message,
-        m.impression,
-        m.created_at,
-        m.updated_at
-      FROM messages m
-      INNER JOIN employees s ON s.id = m.sender_employee_id
-      INNER JOIN employees r ON r.id = m.recipient_employee_id
-      WHERE s.status = 'published' AND r.status = 'published'
-      ORDER BY m.created_at DESC, m.id DESC
-    `;
-
-    const [rows] = await pool.query<MessageRow[]>(query);
-
-    const messages = rows.map((row) => ({
-      id: row.id,
-      sender_employee_id: row.sender_employee_id,
-      sender_name: row.sender_name,
-      sender_initials: generateInitials(row.sender_name),
-      recipient_employee_id: row.recipient_employee_id,
-      recipient_name: row.recipient_name,
-      recipient_initials: generateInitials(row.recipient_name),
-      message: row.message,
-      impression: row.impression,
-      created_at: row.created_at,
-      updated_at: row.updated_at,
-    }));
-
-    sendSuccess(res, 200, messages, 'Daftar pesan dan kesan berhasil diambil');
+    const userProfile = await getCurrentUser(req.user.id);
+    sendSuccess(res, 200, userProfile, 'Data akun berhasil diambil');
   } catch (error) {
-    console.error('[GetMessages Error]', error);
-    sendError(res, 500, 'Gagal mengambil daftar pesan dan kesan');
+    if (error instanceof AuthServiceError) {
+      sendError(res, error.statusCode, error.message);
+      return;
+    }
+    console.error('[AuthMe Error]', error);
+    sendError(res, 500, 'Gagal mengambil data akun');
   }
 }
 ```
 
 ---
 
-### 4. Route Definition & Registrasi
+### 9. Route Auth & Registrasi Router (`server/src/routes/`)
 
-#### `server/src/routes/memory.route.ts`
+#### `server/src/routes/auth.route.ts`
 ```typescript
 import { Router } from 'express';
-import { getMemories, getMemoryById } from '../controllers/memory.controller';
-import { authenticate } from '../middleware/auth.middleware';
+import { login, me } from '../controllers/auth.controller';
+import { authenticate } from '../middleware/authenticate';
+import { loginRateLimiter } from '../middleware/rateLimiter';
 
 const router = Router();
 
-router.get('/memories', authenticate, getMemories);
-router.get('/memories/:id', authenticate, getMemoryById);
-
-export default router;
-```
-
-#### `server/src/routes/message.route.ts`
-```typescript
-import { Router } from 'express';
-import { getMessages } from '../controllers/message.controller';
-import { authenticate } from '../middleware/auth.middleware';
-
-const router = Router();
-
-router.get('/messages', authenticate, getMessages);
+router.post('/auth/login', loginRateLimiter, login);
+router.get('/auth/me', authenticate, me);
 
 export default router;
 ```
@@ -369,14 +669,16 @@ export default router;
 #### `server/src/routes/index.ts`
 ```typescript
 import { Router } from 'express';
-import healthRoutes from './health.route';
+import authRoutes from './auth.route';
 import employeeRoutes from './employee.route';
+import healthRoutes from './health.route';
 import memoryRoutes from './memory.route';
 import messageRoutes from './message.route';
 
 const router = Router();
 
 router.use('/', healthRoutes);
+router.use('/', authRoutes);
 router.use('/', employeeRoutes);
 router.use('/', memoryRoutes);
 router.use('/', messageRoutes);
@@ -386,14 +688,13 @@ export default router;
 
 ---
 
-## Panduan Pengujian & Skenario Test Lengkap Per API
+## Panduan Pengujian & Skenario Test Lengkap (Dengan Reset Data Sebelum Setiap Skenario)
 
-### Aturan Wajib Sebelum Setiap Skenario: Hapus Data Terlebih Dahulu (Clean State)
+### Aturan Wajib Sebelum Setiap Skenario
 
-Agar hasil pengujian 100% deterministik dan tidak terpengaruh sisa data skenario lain, **wajib jalankan pembersihan seluruh tabel** sebelum memulai **setiap skenario uji**:
+Sebelum memulai **setiap skenario uji**, jalankan pembersihan seluruh tabel agar kondisi database 100% deterministik dan terisolasi:
 
 ```sql
--- Jalankan SQL Reset ini di awal SETIAP skenario uji (urutan mengikuti Foreign Key)
 DELETE FROM messages;
 DELETE FROM memory_employees;
 DELETE FROM memories;
@@ -401,103 +702,158 @@ DELETE FROM users;
 DELETE FROM employees;
 ```
 
-Jika menggunakan Node.js / script uji otomatis (tanpa menyimpan kredensial di repo), buat helper `resetDatabase()` dan `createJwtToken()` yang membaca `pool` dan `env.JWT_SECRET` dari `.env` lokal:
-
-```typescript
-// Contoh pola helper reset di test/scratch runner
-async function resetDatabase(): Promise<void> {
-  await pool.query('DELETE FROM messages');
-  await pool.query('DELETE FROM memory_employees');
-  await pool.query('DELETE FROM memories');
-  await pool.query('DELETE FROM users');
-  await pool.query('DELETE FROM employees');
-}
-```
-
-> **Catatan Token Uji:** Karena endpoint `POST /api/auth/login` belum masuk ke scope issue ini, selama pengujian lokal Anda dapat membuat token JWT uji menggunakan `jsonwebtoken` dengan `JWT_SECRET` dari `server/.env` lokal (`jwt.sign({ id: 2, email: 'andi@wargahalim.id', role: 'user', employee_id: 1 }, env.JWT_SECRET, { expiresIn: '1h' })`) setelah baris `users` dengan `id = 2` di-insert ke database pada skenario terkait.
+> **Catatan Pembuatan Hash Uji:** Pada runner automated test, gunakan `hashPassword('password123')` dari `src/utils/crypt.ts` saat menyisipkan fixture ke tabel `users` agar hash 100% cocok dengan `bcryptjs`.
 
 ---
 
-### A. Skenario Uji `GET /api/memories`
+### Daftar 14 Skenario Uji Wajib (Unit/Middleware + Integration API)
 
-#### `TC-MEM-01` — Sukses Mengambil Daftar Kenangan Terbit (Terurut `event_date DESC`, `draft` Disembunyikan)
+#### `TC-AUTH-01` — Login Berhasil sebagai User Aktif (`200 OK`)
 1. **Reset & Setup Data:**
-   ```sql
-   DELETE FROM messages; DELETE FROM memory_employees; DELETE FROM memories; DELETE FROM users; DELETE FROM employees;
-
-   INSERT INTO users (id, name, email, password_hash, role, employee_id, is_active) VALUES
-     (2, 'Andi Budi', 'andi@wargahalim.id', '$2a$10$7EqJtq98hPqEX7fNZaFWoO5r5vA5g2v5z7qW5x5q5z5v5x5q5z5vS', 'user', NULL, 1);
-
-   INSERT INTO memories (id, title, event_date, story, status, created_at) VALUES
-     (1, 'Peluncuran Produk Perdana', '2020-11-10', 'Malam begadang bersama tim teknologi.', 'published', '2026-11-12 09:00:00'),
-     (2, 'Outing Puncak 2022', '2022-08-17', 'Perjalanan bersama seluruh tim ke Puncak.', 'published', '2026-11-12 10:00:00'),
-     (3, 'Catatan Rahasia Draft', '2024-01-01', 'Belum siap terbit.', 'draft', '2026-11-12 11:00:00');
-   ```
-2. **Contoh Request:**
+   - Bersihkan 5 tabel (`DELETE FROM ...`).
+   - Insert `employees (id=1, full_name='Andi Budi', nickname='Andi', status='published')`.
+   - Insert `users (id=2, name='Andi Budi', email='andi@wargahalim.id', password_hash=hash('password123'), role='user', employee_id=1, is_active=1)`.
+2. **Request:**
    ```bash
-   curl -i -X GET "http://localhost:5000/api/memories" \
-     -H "Authorization: Bearer <VALID_USER_TOKEN>"
+   curl -i -X POST "http://localhost:5000/api/auth/login" \
+     -H "Content-Type: application/json" \
+     -d '{"email":"andi@wargahalim.id","password":"password123"}'
    ```
-3. **Contoh Response (`200 OK`):**
-   *(Perhatikan: ID 2 muncul paling atas karena `2022-08-17` > `2020-11-10`, dan ID 3 `draft` tidak muncul.)*
+3. **Expected Response (`200 OK`):**
    ```json
    {
      "success": true,
-     "data": [
-       {
+     "data": {
+       "token": "<jwt_valid_1d>",
+       "user": {
          "id": 2,
-         "title": "Outing Puncak 2022",
-         "event_date": "2022-08-17",
-         "story": "Perjalanan bersama seluruh tim ke Puncak.",
-         "created_at": "2026-11-12T03:00:00.000Z"
-       },
-       {
-         "id": 1,
-         "title": "Peluncuran Produk Perdana",
-         "event_date": "2020-11-10",
-         "story": "Malam begadang bersama tim teknologi.",
-         "created_at": "2026-11-12T02:00:00.000Z"
+         "name": "Andi Budi",
+         "email": "andi@wargahalim.id",
+         "role": "user",
+         "employee_id": 1,
+         "employeeId": 1,
+         "is_active": true,
+         "isActive": true
        }
-     ],
-     "message": "Daftar kenangan berhasil diambil"
+     },
+     "message": "Login berhasil"
    }
    ```
+   *(Pastikan `password_hash` tidak ada di payload dan JWT memuat `exp` sekitar 24 jam setelah `iat`.)*
 
-#### `TC-MEM-02` — Data Kenangan Kosong / Hanya Ada Data `draft`
+---
+
+#### `TC-AUTH-02` — Login Berhasil sebagai Admin Aktif (`200 OK`)
 1. **Reset & Setup Data:**
-   ```sql
-   DELETE FROM messages; DELETE FROM memory_employees; DELETE FROM memories; DELETE FROM users; DELETE FROM employees;
-
-   INSERT INTO users (id, name, email, password_hash, role, employee_id, is_active) VALUES
-     (2, 'Andi Budi', 'andi@wargahalim.id', '$2a$10$7EqJtq98hPqEX7fNZaFWoO5r5vA5g2v5z7qW5x5q5z5v5x5q5z5vS', 'user', NULL, 1);
-
-   INSERT INTO memories (id, title, event_date, story, status) VALUES
-     (1, 'Kenangan Draft Saja', '2023-05-01', 'Belum dipublikasikan.', 'draft');
-   ```
-2. **Contoh Request:**
+   - Bersihkan 5 tabel.
+   - Insert `users (id=1, name='Admin Halim', email='admin@wargahalim.id', password_hash=hash('admin123'), role='admin', employee_id=NULL, is_active=1)`.
+2. **Request:**
    ```bash
-   curl -i -X GET "http://localhost:5000/api/memories" \
-     -H "Authorization: Bearer <VALID_USER_TOKEN>"
+   curl -i -X POST "http://localhost:5000/api/auth/login" \
+     -H "Content-Type: application/json" \
+     -d '{"email":"admin@wargahalim.id","password":"admin123"}'
    ```
-3. **Contoh Response (`200 OK`):**
+3. **Expected Response (`200 OK`):**
+   `data.user.role === "admin"`, `data.user.employee_id === null`, `data.user.employeeId === null`, dan `token` valid.
+
+---
+
+#### `TC-AUTH-03` — Login dengan Password Salah (`401 Unauthorized`)
+1. **Reset & Setup Data:**
+   - Bersihkan 5 tabel, insert user aktif `andi@wargahalim.id` dengan password `password123`.
+2. **Request:**
+   ```bash
+   curl -i -X POST "http://localhost:5000/api/auth/login" \
+     -H "Content-Type: application/json" \
+     -d '{"email":"andi@wargahalim.id","password":"salahpassword"}'
+   ```
+3. **Expected Response (`401 Unauthorized`):**
    ```json
    {
-     "success": true,
-     "data": [],
-     "message": "Daftar kenangan berhasil diambil"
+     "success": false,
+     "data": null,
+     "message": "Email atau password salah"
    }
    ```
 
-#### `TC-MEM-03` — Pengunjung Tanpa Token Mengakses `GET /api/memories`
+---
+
+#### `TC-AUTH-04` — Login dengan Email Tidak Terdaftar (`401 Unauthorized`, Anti User-Enumeration)
 1. **Reset & Setup Data:**
-   ```sql
-   DELETE FROM messages; DELETE FROM memory_employees; DELETE FROM memories; DELETE FROM users; DELETE FROM employees;
-   ```
-2. **Contoh Request:**
+   - Bersihkan 5 tabel (tabel `users` kosong).
+2. **Request:**
    ```bash
-   curl -i -X GET "http://localhost:5000/api/memories"
+   curl -i -X POST "http://localhost:5000/api/auth/login" \
+     -H "Content-Type: application/json" \
+     -d '{"email":"tidaktahu@wargahalim.id","password":"password123"}'
    ```
-3. **Contoh Response (`401 Unauthorized`):**
+3. **Expected Response (`401 Unauthorized`):**
+   ```json
+   {
+     "success": false,
+     "data": null,
+     "message": "Email atau password salah"
+   }
+   ```
+   *(Pesan error identik dengan `TC-AUTH-03` agar tidak membocorkan keberadaan email di sistem.)*
+
+---
+
+#### `TC-AUTH-05` — Login Gagal Validasi Zod (`400 Bad Request`)
+1. **Reset & Setup Data:** Bersihkan 5 tabel.
+2. **Request A (Password < 6 karakter):**
+   ```bash
+   curl -i -X POST "http://localhost:5000/api/auth/login" \
+     -H "Content-Type: application/json" \
+     -d '{"email":"andi@wargahalim.id","password":"12345"}'
+   ```
+   **Expected Response A (`400 Bad Request`):**
+   ```json
+   {
+     "success": false,
+     "data": { "errors": { "password": "Password minimal 6 karakter" } },
+     "message": "Password minimal 6 karakter"
+   }
+   ```
+3. **Request B (Email < 5 karakter atau format tidak valid):**
+   ```bash
+   curl -i -X POST "http://localhost:5000/api/auth/login" \
+     -H "Content-Type: application/json" \
+     -d '{"email":"a@b","password":"password123"}'
+   ```
+   **Expected Response B (`400 Bad Request`):**
+   `success: false`, pesan error email minimal 5 karakter / format email tidak valid.
+
+---
+
+#### `TC-AUTH-06` — Login Menggunakan Akun Nonaktif `is_active = 0` (`403 Forbidden`)
+1. **Reset & Setup Data:**
+   - Bersihkan 5 tabel.
+   - Insert `users (id=2, name='Andi Nonaktif', email='andi@wargahalim.id', password_hash=hash('password123'), role='user', employee_id=NULL, is_active=0)`.
+2. **Request:**
+   ```bash
+   curl -i -X POST "http://localhost:5000/api/auth/login" \
+     -H "Content-Type: application/json" \
+     -d '{"email":"andi@wargahalim.id","password":"password123"}'
+   ```
+3. **Expected Response (`403 Forbidden`):**
+   ```json
+   {
+     "success": false,
+     "data": null,
+     "message": "Akun Anda telah dinonaktifkan. Silakan hubungi admin"
+   }
+   ```
+
+---
+
+#### `TC-AUTH-07` — `GET /api/auth/me` Tanpa Token (`401 Unauthorized`)
+1. **Reset & Setup Data:** Bersihkan 5 tabel.
+2. **Request:**
+   ```bash
+   curl -i -X GET "http://localhost:5000/api/auth/me"
+   ```
+3. **Expected Response (`401 Unauthorized`):**
    ```json
    {
      "success": false,
@@ -506,17 +862,45 @@ async function resetDatabase(): Promise<void> {
    }
    ```
 
-#### `TC-MEM-04` — Token JWT Tidak Valid / Rusak
+---
+
+#### `TC-AUTH-08` — `GET /api/auth/me` dengan Token Valid (`200 OK`)
 1. **Reset & Setup Data:**
-   ```sql
-   DELETE FROM messages; DELETE FROM memory_employees; DELETE FROM memories; DELETE FROM users; DELETE FROM employees;
-   ```
-2. **Contoh Request:**
+   - Bersihkan 5 tabel, insert `employees (id=1)` dan `users (id=2, employee_id=1, is_active=1)`.
+   - Login via `POST /api/auth/login` untuk memperoleh `<VALID_TOKEN>`.
+2. **Request:**
    ```bash
-   curl -i -X GET "http://localhost:5000/api/memories" \
-     -H "Authorization: Bearer token.palsu.tidakvalid"
+   curl -i -X GET "http://localhost:5000/api/auth/me" \
+     -H "Authorization: Bearer <VALID_TOKEN>"
    ```
-3. **Contoh Response (`401 Unauthorized`):**
+3. **Expected Response (`200 OK`):**
+   ```json
+   {
+     "success": true,
+     "data": {
+       "id": 2,
+       "name": "Andi Budi",
+       "email": "andi@wargahalim.id",
+       "role": "user",
+       "employee_id": 1,
+       "employeeId": 1,
+       "is_active": true,
+       "isActive": true
+     },
+     "message": "Data akun berhasil diambil"
+   }
+   ```
+
+---
+
+#### `TC-AUTH-09` — `GET /api/auth/me` dengan Token Kedaluwarsa atau Rusak (`401 Unauthorized`)
+1. **Reset & Setup Data:** Bersihkan 5 tabel. Buat expired JWT dengan `jwt.sign({ id: 2, email: 'andi@wargahalim.id', role: 'user', employee_id: null }, env.JWT_SECRET, { expiresIn: '-1s' })`.
+2. **Request:**
+   ```bash
+   curl -i -X GET "http://localhost:5000/api/auth/me" \
+     -H "Authorization: Bearer <EXPIRED_OR_INVALID_TOKEN>"
+   ```
+3. **Expected Response (`401 Unauthorized`):**
    ```json
    {
      "success": false,
@@ -525,20 +909,19 @@ async function resetDatabase(): Promise<void> {
    }
    ```
 
-#### `TC-MEM-05` — User Nonaktif (`is_active = 0`) Mengakses `GET /api/memories`
-1. **Reset & Setup Data:**
-   ```sql
-   DELETE FROM messages; DELETE FROM memory_employees; DELETE FROM memories; DELETE FROM users; DELETE FROM employees;
+---
 
-   INSERT INTO users (id, name, email, password_hash, role, employee_id, is_active) VALUES
-     (2, 'Andi Nonaktif', 'andi@wargahalim.id', '$2a$10$7EqJtq98hPqEX7fNZaFWoO5r5vA5g2v5z7qW5x5q5z5v5x5q5z5vS', 'user', NULL, 0);
-   ```
-2. **Contoh Request:**
+#### `TC-AUTH-10` — Akun Dinonaktifkan Setelah Mendapat Token Ditolak Saat Menggunakan Token (`403 Forbidden`)
+1. **Reset & Setup Data:**
+   - Bersihkan 5 tabel, insert `users (id=2, is_active=1)`.
+   - Dapatkan `<VALID_TOKEN>` melalui `POST /api/auth/login`.
+   - Simulasi admin menonaktifkan user: `UPDATE users SET is_active = 0 WHERE id = 2`.
+2. **Request:**
    ```bash
-   curl -i -X GET "http://localhost:5000/api/memories" \
-     -H "Authorization: Bearer <TOKEN_USER_ID_2>"
+   curl -i -X GET "http://localhost:5000/api/auth/me" \
+     -H "Authorization: Bearer <VALID_TOKEN>"
    ```
-3. **Contoh Response (`403 Forbidden`):**
+3. **Expected Response (`403 Forbidden`):**
    ```json
    {
      "success": false,
@@ -549,381 +932,88 @@ async function resetDatabase(): Promise<void> {
 
 ---
 
-### B. Skenario Uji `GET /api/memories/:id` *(Contoh: `GET /api/memories/1`)*
-
-#### `TC-MEM-DTL-01` — Sukses Mengambil Detail `GET /api/memories/1` Beserta Tag Karyawan Terbit (`draft` Terfilter)
+#### `TC-AUTH-11` — Automated Unit/Middleware Test: User (`role = 'user'`) Ditolak di Middleware Admin (`403 Forbidden`)
 1. **Reset & Setup Data:**
-   ```sql
-   DELETE FROM messages; DELETE FROM memory_employees; DELETE FROM memories; DELETE FROM users; DELETE FROM employees;
-
-   INSERT INTO employees (id, full_name, nickname, photo_url, status) VALUES
-     (1, 'Andi Budi', 'Andi', 'https://xxx.public.blob.vercel-storage.com/employees/1.jpg', 'published'),
-     (2, 'Citra Dewi', 'Citra', NULL, 'published'),
-     (3, 'Karyawan Draft', 'Draft', NULL, 'draft');
-
-   INSERT INTO users (id, name, email, password_hash, role, employee_id, is_active) VALUES
-     (2, 'Andi Budi', 'andi@wargahalim.id', '$2a$10$7EqJtq98hPqEX7fNZaFWoO5r5vA5g2v5z7qW5x5q5z5v5x5q5z5vS', 'user', 1, 1);
-
-   INSERT INTO memories (id, title, event_date, story, status) VALUES
-     (1, 'Outing Puncak 2022', '2022-08-17', 'Cerita lengkap kenangan bersama di Puncak.', 'published');
-
-   INSERT INTO memory_employees (memory_id, employee_id) VALUES
-     (1, 1),
-     (1, 2),
-     (1, 3);
-   ```
-2. **Contoh Request:**
-   ```bash
-   curl -i -X GET "http://localhost:5000/api/memories/1" \
-     -H "Authorization: Bearer <VALID_USER_TOKEN>"
-   ```
-3. **Contoh Response (`200 OK`):**
-   *(Perhatikan: Karyawan `id: 3` berstatus `draft` tidak ikut muncul di `employees`, dan tidak ada kolom `position`.)*
-   ```json
-   {
-     "success": true,
-     "data": {
-       "id": 1,
-       "title": "Outing Puncak 2022",
-       "event_date": "2022-08-17",
-       "story": "Cerita lengkap kenangan bersama di Puncak.",
-       "employees": [
-         {
-           "id": 1,
-           "full_name": "Andi Budi",
-           "photo_url": "https://xxx.public.blob.vercel-storage.com/employees/1.jpg",
-           "initials": "AB"
-         },
-         {
-           "id": 2,
-           "full_name": "Citra Dewi",
-           "photo_url": null,
-           "initials": "CD"
-         }
-       ]
-     },
-     "message": "Detail kenangan berhasil diambil"
-   }
-   ```
-
-#### `TC-MEM-DTL-02` — Sukses Mengambil Detail `GET /api/memories/1` Tanpa Tag Karyawan
-1. **Reset & Setup Data:**
-   ```sql
-   DELETE FROM messages; DELETE FROM memory_employees; DELETE FROM memories; DELETE FROM users; DELETE FROM employees;
-
-   INSERT INTO users (id, name, email, password_hash, role, employee_id, is_active) VALUES
-     (2, 'Andi Budi', 'andi@wargahalim.id', '$2a$10$7EqJtq98hPqEX7fNZaFWoO5r5vA5g2v5z7qW5x5q5z5v5x5q5z5vS', 'user', NULL, 1);
-
-   INSERT INTO memories (id, title, event_date, story, status) VALUES
-     (1, 'Catatan Awal Berdiri', '2019-02-01', 'Kenangan sebelum ada tag karyawan.', 'published');
-   ```
-2. **Contoh Request:**
-   ```bash
-   curl -i -X GET "http://localhost:5000/api/memories/1" \
-     -H "Authorization: Bearer <VALID_USER_TOKEN>"
-   ```
-3. **Contoh Response (`200 OK`):**
-   ```json
-   {
-     "success": true,
-     "data": {
-       "id": 1,
-       "title": "Catatan Awal Berdiri",
-       "event_date": "2019-02-01",
-       "story": "Kenangan sebelum ada tag karyawan.",
-       "employees": []
-     },
-     "message": "Detail kenangan berhasil diambil"
-   }
-   ```
-
-#### `TC-MEM-DTL-03` — Mengakses `GET /api/memories/1` yang Berstatus `draft`
-1. **Reset & Setup Data:**
-   ```sql
-   DELETE FROM messages; DELETE FROM memory_employees; DELETE FROM memories; DELETE FROM users; DELETE FROM employees;
-
-   INSERT INTO users (id, name, email, password_hash, role, employee_id, is_active) VALUES
-     (2, 'Andi Budi', 'andi@wargahalim.id', '$2a$10$7EqJtq98hPqEX7fNZaFWoO5r5vA5g2v5z7qW5x5q5z5v5x5q5z5vS', 'user', NULL, 1);
-
-   INSERT INTO memories (id, title, event_date, story, status) VALUES
-     (1, 'Draft Rahasia', '2023-05-01', 'Masih disusun admin.', 'draft');
-   ```
-2. **Contoh Request:**
-   ```bash
-   curl -i -X GET "http://localhost:5000/api/memories/1" \
-     -H "Authorization: Bearer <VALID_USER_TOKEN>"
-   ```
-3. **Contoh Response (`404 Not Found`):**
+   - Bersihkan 5 tabel, insert user `id=2` (`role='user'`, `is_active=1`).
+   - Buat rute uji sementara pada Express test harness: `app.get('/api/test-admin', authenticate, authorize('admin'), (_req, res) => sendSuccess(res, 200, { ok: true }, 'OK'))`.
+2. **Request:** Kirim `GET /api/test-admin` dengan token `user` (dan uji juga jika token dibuat memalsukan `role: 'admin'` di payload JWT, pastikan `authenticate` membaca `role: 'user'` terbaru dari database sehingga tetap ditolak!).
+3. **Expected Response (`403 Forbidden`):**
    ```json
    {
      "success": false,
      "data": null,
-     "message": "Kenangan tidak ditemukan"
-   }
-   ```
-
-#### `TC-MEM-DTL-04` — ID Kenangan Tidak Ditemukan (`GET /api/memories/999`)
-1. **Reset & Setup Data:**
-   ```sql
-   DELETE FROM messages; DELETE FROM memory_employees; DELETE FROM memories; DELETE FROM users; DELETE FROM employees;
-
-   INSERT INTO users (id, name, email, password_hash, role, employee_id, is_active) VALUES
-     (2, 'Andi Budi', 'andi@wargahalim.id', '$2a$10$7EqJtq98hPqEX7fNZaFWoO5r5vA5g2v5z7qW5x5q5z5v5x5q5z5vS', 'user', NULL, 1);
-   ```
-2. **Contoh Request:**
-   ```bash
-   curl -i -X GET "http://localhost:5000/api/memories/999" \
-     -H "Authorization: Bearer <VALID_USER_TOKEN>"
-   ```
-3. **Contoh Response (`404 Not Found`):**
-   ```json
-   {
-     "success": false,
-     "data": null,
-     "message": "Kenangan tidak ditemukan"
-   }
-   ```
-
-#### `TC-MEM-DTL-05` — Parameter ID Tidak Valid (`GET /api/memories/abc` atau `/api/memories/0`)
-1. **Reset & Setup Data:**
-   ```sql
-   DELETE FROM messages; DELETE FROM memory_employees; DELETE FROM memories; DELETE FROM users; DELETE FROM employees;
-
-   INSERT INTO users (id, name, email, password_hash, role, employee_id, is_active) VALUES
-     (2, 'Andi Budi', 'andi@wargahalim.id', '$2a$10$7EqJtq98hPqEX7fNZaFWoO5r5vA5g2v5z7qW5x5q5z5v5x5q5z5vS', 'user', NULL, 1);
-   ```
-2. **Contoh Request:**
-   ```bash
-   curl -i -X GET "http://localhost:5000/api/memories/abc" \
-     -H "Authorization: Bearer <VALID_USER_TOKEN>"
-   ```
-3. **Contoh Response (`400 Bad Request`):**
-   ```json
-   {
-     "success": false,
-     "data": null,
-     "message": "ID kenangan harus berupa angka"
-   }
-   ```
-
-#### `TC-MEM-DTL-06` — Pengunjung Tanpa Token (`401`) & Akun Nonaktif (`403`) pada `GET /api/memories/1`
-1. **Reset & Setup Data:**
-   ```sql
-   DELETE FROM messages; DELETE FROM memory_employees; DELETE FROM memories; DELETE FROM users; DELETE FROM employees;
-
-   INSERT INTO users (id, name, email, password_hash, role, employee_id, is_active) VALUES
-     (2, 'Andi Nonaktif', 'andi@wargahalim.id', '$2a$10$7EqJtq98hPqEX7fNZaFWoO5r5vA5g2v5z7qW5x5q5z5v5x5q5z5vS', 'user', NULL, 0);
-
-   INSERT INTO memories (id, title, event_date, story, status) VALUES
-     (1, 'Outing Puncak 2022', '2022-08-17', 'Cerita lengkap.', 'published');
-   ```
-2. **Contoh Request A (Tanpa Token):**
-   ```bash
-   curl -i -X GET "http://localhost:5000/api/memories/1"
-   ```
-   **Response A (`401 Unauthorized`):**
-   ```json
-   {
-     "success": false,
-     "data": null,
-     "message": "Akses ditolak. Token autentikasi tidak ditemukan"
-   }
-   ```
-3. **Contoh Request B (Token Akun Nonaktif):**
-   ```bash
-   curl -i -X GET "http://localhost:5000/api/memories/1" \
-     -H "Authorization: Bearer <TOKEN_USER_ID_2>"
-   ```
-   **Response B (`403 Forbidden`):**
-   ```json
-   {
-     "success": false,
-     "data": null,
-     "message": "Akses ditolak. Akun Anda telah dinonaktifkan atau tidak ditemukan"
+     "message": "Akses ditolak. Anda tidak memiliki izin untuk mengakses sumber daya ini"
    }
    ```
 
 ---
 
-### C. Skenario Uji `GET /api/messages`
-
-#### `TC-MSG-01` — Sukses Mengambil Pesan Terbit (Urut Terbaru, `impression: null` Aman, Pesan Melibatkan Karyawan `draft` Disembunyikan)
+#### `TC-AUTH-12` — Automated Unit/Middleware Test: Admin (`role = 'admin'`) Diizinkan di Middleware Admin (`200 OK`)
 1. **Reset & Setup Data:**
-   ```sql
-   DELETE FROM messages; DELETE FROM memory_employees; DELETE FROM memories; DELETE FROM users; DELETE FROM employees;
+   - Bersihkan 5 tabel, insert admin `id=1` (`role='admin'`, `is_active=1`).
+2. **Request:** Kirim `GET /api/test-admin` (menggunakan middleware `authenticate, authorize('admin')`) dengan token admin yang sah.
+3. **Expected Response (`200 OK`):**
+   `status === 200`, `body.success === true`.
 
-   INSERT INTO employees (id, full_name, nickname, status) VALUES
-     (1, 'Andi Budi', 'Andi', 'published'),
-     (2, 'Citra Dewi', 'Citra', 'published'),
-     (3, 'Ziyah Draft', 'Ziyah', 'draft');
+---
 
-   INSERT INTO users (id, name, email, password_hash, role, employee_id, is_active) VALUES
-     (2, 'Andi Budi', 'andi@wargahalim.id', '$2a$10$7EqJtq98hPqEX7fNZaFWoO5r5vA5g2v5z7qW5x5q5z5v5x5q5z5vS', 'user', 1, 1);
+#### `TC-AUTH-13` — Rate Limiter Login: Percobaan Ke-6 dalam 1 Menit Ditolak (`429 Too Many Requests`)
+1. **Reset & Setup Data:** Bersihkan 5 tabel, insert user aktif `andi@wargahalim.id`.
+2. **Langkah:** Gunakan instance Express dengan `createLoginRateLimiter()` segar lalu kirim `POST /api/auth/login` sebanyak **6 kali berturut-turut** dalam 1 menit.
+3. **Expected Result:**
+   - Percobaan ke-1 s.d. ke-5 mendapat status `401` (jika password salah) atau `200`.
+   - Percobaan **ke-6** ditolak dengan HTTP **`429 Too Many Requests`**:
+     ```json
+     {
+       "success": false,
+       "data": null,
+       "message": "Terlalu banyak percobaan login. Silakan coba lagi setelah 1 menit"
+     }
+     ```
 
-   INSERT INTO messages (id, sender_employee_id, recipient_employee_id, message, impression, created_at, updated_at) VALUES
-     (1, 1, 2, 'Pesan pertama yang lebih lama.', NULL, '2026-11-12 08:00:00', '2026-11-12 08:00:00'),
-     (2, 2, 1, 'Terima kasih selalu membantu saat rilis!', 'Rekan kerja yang sangat sabar.', '2026-11-12 10:00:00', '2026-11-12 10:00:00'),
-     (3, 3, 1, 'Pesan dari karyawan draft harus disembunyikan.', 'Draft.', '2026-11-12 12:00:00', '2026-11-12 12:00:00');
-   ```
-2. **Contoh Request:**
+---
+
+#### `TC-AUTH-14` — Penolakan Registrasi Mandiri (`POST /api/auth/register`) Termasuk Percobaan Injeksi `role: "admin"` (`404 Not Found`)
+1. **Reset & Setup Data:** Bersihkan 5 tabel.
+2. **Request:**
    ```bash
-   curl -i -X GET "http://localhost:5000/api/messages" \
-     -H "Authorization: Bearer <VALID_USER_TOKEN>"
+   curl -i -X POST "http://localhost:5000/api/auth/register" \
+     -H "Content-Type: application/json" \
+     -d '{"name":"Hacker","email":"hacker@wargahalim.id","password":"password123","role":"admin"}'
    ```
-3. **Contoh Response (`200 OK`):**
-   *(Perhatikan: Pesan ID 2 tampil di atas ID 1; Pesan ID 3 dari pengirim `draft` terfilter keluar; tidak ada `sender_position` / `recipient_position`.)*
-   ```json
-   {
-     "success": true,
-     "data": [
-       {
-         "id": 2,
-         "sender_employee_id": 2,
-         "sender_name": "Citra Dewi",
-         "sender_initials": "CD",
-         "recipient_employee_id": 1,
-         "recipient_name": "Andi Budi",
-         "recipient_initials": "AB",
-         "message": "Terima kasih selalu membantu saat rilis!",
-         "impression": "Rekan kerja yang sangat sabar.",
-         "created_at": "2026-11-12T03:00:00.000Z",
-         "updated_at": "2026-11-12T03:00:00.000Z"
-       },
-       {
-         "id": 1,
-         "sender_employee_id": 1,
-         "sender_name": "Andi Budi",
-         "sender_initials": "AB",
-         "recipient_employee_id": 2,
-         "recipient_name": "Citra Dewi",
-         "recipient_initials": "CD",
-         "message": "Pesan pertama yang lebih lama.",
-         "impression": null,
-         "created_at": "2026-11-12T01:00:00.000Z",
-         "updated_at": "2026-11-12T01:00:00.000Z"
-       }
-     ],
-     "message": "Daftar pesan dan kesan berhasil diambil"
-   }
-   ```
-
-#### `TC-MSG-02` — Tabel Pesan Kosong (`data: []`)
-1. **Reset & Setup Data:**
-   ```sql
-   DELETE FROM messages; DELETE FROM memory_employees; DELETE FROM memories; DELETE FROM users; DELETE FROM employees;
-
-   INSERT INTO users (id, name, email, password_hash, role, employee_id, is_active) VALUES
-     (2, 'Andi Budi', 'andi@wargahalim.id', '$2a$10$7EqJtq98hPqEX7fNZaFWoO5r5vA5g2v5z7qW5x5q5z5v5x5q5z5vS', 'user', NULL, 1);
-   ```
-2. **Contoh Request:**
-   ```bash
-   curl -i -X GET "http://localhost:5000/api/messages" \
-     -H "Authorization: Bearer <VALID_USER_TOKEN>"
-   ```
-3. **Contoh Response (`200 OK`):**
-   ```json
-   {
-     "success": true,
-     "data": [],
-     "message": "Daftar pesan dan kesan berhasil diambil"
-   }
-   ```
-
-#### `TC-MSG-03` — Konsistensi `ON DELETE CASCADE` Saat Karyawan Dihapus
-1. **Reset & Setup Data:**
-   ```sql
-   DELETE FROM messages; DELETE FROM memory_employees; DELETE FROM memories; DELETE FROM users; DELETE FROM employees;
-
-   INSERT INTO employees (id, full_name, nickname, status) VALUES
-     (1, 'Andi Budi', 'Andi', 'published'),
-     (2, 'Citra Dewi', 'Citra', 'published');
-
-   INSERT INTO users (id, name, email, password_hash, role, employee_id, is_active) VALUES
-     (2, 'Andi Budi', 'andi@wargahalim.id', '$2a$10$7EqJtq98hPqEX7fNZaFWoO5r5vA5g2v5z7qW5x5q5z5v5x5q5z5vS', 'user', 1, 1);
-
-   INSERT INTO messages (id, sender_employee_id, recipient_employee_id, message, impression) VALUES
-     (1, 2, 1, 'Pesan untuk Andi.', 'Sabar.');
-
-   -- Simulasi admin menghapus karyawan Citra (id = 2)
-   DELETE FROM employees WHERE id = 2;
-   ```
-2. **Contoh Request:**
-   ```bash
-   curl -i -X GET "http://localhost:5000/api/messages" \
-     -H "Authorization: Bearer <VALID_USER_TOKEN>"
-   ```
-3. **Contoh Response (`200 OK`):**
-   *(Pesan ikut terhapus otomatis oleh `ON DELETE CASCADE`, tidak terjadi error JOIN.)*
-   ```json
-   {
-     "success": true,
-     "data": [],
-     "message": "Daftar pesan dan kesan berhasil diambil"
-   }
-   ```
-
-#### `TC-MSG-04` — Pengunjung Tanpa Token Mengakses `GET /api/messages`
-1. **Reset & Setup Data:**
-   ```sql
-   DELETE FROM messages; DELETE FROM memory_employees; DELETE FROM memories; DELETE FROM users; DELETE FROM employees;
-   ```
-2. **Contoh Request:**
-   ```bash
-   curl -i -X GET "http://localhost:5000/api/messages"
-   ```
-3. **Contoh Response (`401 Unauthorized`):**
+3. **Expected Response (`404 Not Found`):**
    ```json
    {
      "success": false,
      "data": null,
-     "message": "Akses ditolak. Token autentikasi tidak ditemukan"
+     "message": "Endpoint tidak ditemukan"
    }
    ```
+   *(Menegaskan bahwa fitur registrasi mandiri ditiadakan dan tidak ada celah privilege escalation.)*
 
-#### `TC-MSG-05` — Token Rusak (`401`) & Akun Nonaktif (`403`) pada `GET /api/messages`
-1. **Reset & Setup Data:**
-   ```sql
-   DELETE FROM messages; DELETE FROM memory_employees; DELETE FROM memories; DELETE FROM users; DELETE FROM employees;
+---
 
-   INSERT INTO users (id, name, email, password_hash, role, employee_id, is_active) VALUES
-     (2, 'Andi Nonaktif', 'andi@wargahalim.id', '$2a$10$7EqJtq98hPqEX7fNZaFWoO5r5vA5g2v5z7qW5x5q5z5v5x5q5z5vS', 'user', NULL, 0);
-   ```
-2. **Contoh Request A (Token Rusak):**
-   ```bash
-   curl -i -X GET "http://localhost:5000/api/messages" \
-     -H "Authorization: Bearer token.rusak.123"
-   ```
-   **Response A (`401 Unauthorized`):**
-   ```json
-   {
-     "success": false,
-     "data": null,
-     "message": "Token autentikasi tidak valid atau telah kedaluwarsa"
-   }
-   ```
-3. **Contoh Request B (Token Akun Nonaktif):**
-   ```bash
-   curl -i -X GET "http://localhost:5000/api/messages" \
-     -H "Authorization: Bearer <TOKEN_USER_ID_2>"
-   ```
-   **Response B (`403 Forbidden`):**
-   ```json
-   {
-     "success": false,
-     "data": null,
-     "message": "Akses ditolak. Akun Anda telah dinonaktifkan atau tidak ditemukan"
-   }
-   ```
+## Penjelasan Wajib Setelah Implementasi
+
+Setelah seluruh kode selesai diimplementasikan, diuji, dan lolos `typecheck` + `build`, developer/AI **wajib** menyertakan penjelasan ringkas dan akurat mengenai 6 hal berikut:
+
+1. **Semua file yang dibuat atau diubah** (beserta peran masing-masing file).
+2. **Alur login (`POST /api/auth/login`)** dari validasi Zod, rate limiter, pencarian user, verifikasi `bcryptjs`, pengecekan `is_active`, hingga penerbitan JWT.
+3. **Alur proteksi registrasi** (penjelasan bahwa registrasi mandiri dinonaktifkan sesuai PRD dan pembuatan akun `user` dikelola oleh Admin / akun `admin` via seed).
+4. **Cara kerja JWT di aplikasi ini** (struktur payload, signature dengan `JWT_SECRET`, masa berlaku `1d`, serta verifikasi ulang ke database).
+5. **Perbedaan `authenticate` dan `authorize`** (siapa Anda vs apa yang boleh Anda akses).
+6. **Hasil eksekusi testing seluruh 14 skenario** beserta bukti lulus tanpa kegagalan.
 
 ---
 
 ## Checklist Review Akhir Sebelum Submit PR
 
 - [x] `npm --prefix server run typecheck` dan `npm --prefix server run build` lulus dengan 0 error (tanpa tipe `any`).
-- [x] Seluruh 3 endpoint memakai middleware `authenticate` dari `src/middleware/auth.middleware.ts`.
-- [x] `GET /api/memories` hanya menampilkan status `published` dan terurut `event_date DESC`.
-- [x] `GET /api/memories/:id` memvalidasi `:id` via Zod, mengembalikan `404` untuk `draft`/tidak ada, dan memfilter tag `employees` hanya `published`.
-- [x] `GET /api/messages` hanya menampilkan pesan jika `sender` dan `recipient` sama-sama berstatus `published` (tanpa kolom `position`).
-- [x] Seluruh 16 skenario pengujian lulus setelah reset data (`DELETE FROM ...`) sebelum tiap skenario.
+- [x] Pemisahan folder rapi: `routes/`, `controllers/`, `services/`, `schemas/`, `middleware/`, dan `types/express.d.ts`.
+- [x] `POST /api/auth/login` memiliki rate limiter (`max: 5` per menit) dan tidak membocorkan apakah email atau password yang salah.
+- [x] `GET /api/auth/me` dilindungi `authenticate` dan mengembalikan `employee_id`/`employeeId` serta `is_active`/`isActive` tanpa `password_hash`.
+- [x] Middleware `authenticate` memeriksa status `is_active` dan `role` terbaru langsung dari database MySQL.
+- [x] Middleware `authorize` reusable berfungsi menolak `user` biasa dengan `403` dan mengizinkan `admin`.
+- [x] Seluruh 14 skenario pengujian lulus setelah reset data (`DELETE FROM ...`) sebelum tiap skenario.
 - [x] File `.env` lokal dan kredensial tidak terlacak Git (`git status` bersih dari secret).
 
